@@ -37,7 +37,7 @@ export default function LoginPage() {
                 <h1 className="text-2xl font-semibold text-center">Log in</h1>
 
                 {error && (
-                    <p className="text-red-600 text-sm bg-red-50 p-2 rounded">
+                    <p className="balance-negative text-sm bg-red-50 p-2 rounded">
                         {error}
                     </p>
                 )}

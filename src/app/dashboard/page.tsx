@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { Header } from "@/components/Header";
 
 type User = { id: string; email: string; name: string };
 type Workspace = { id: string; name: string };
@@ -29,6 +30,7 @@ export default function DashboardPage() {
 
     // New workspace form state
     const [newWorkspaceName, setNewWorkspaceName] = useState("");
+    const [creatingWorkspace, setCreatingWorkspace] = useState(false);
 
     useEffect(() => {
         async function load() {
@@ -79,6 +81,8 @@ export default function DashboardPage() {
 
     async function handleCreateWorkspace(e: React.FormEvent) {
         e.preventDefault();
+        if (creatingWorkspace) return; // guard against double-submit even if click lands twice fast
+        setCreatingWorkspace(true);
         try {
             const res = await apiFetch<{ workspace: Workspace }>(
                 "/api/workspaces",
@@ -91,6 +95,8 @@ export default function DashboardPage() {
             setNewWorkspaceName("");
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to create workspace");
+        } finally {
+            setCreatingWorkspace(false);
         }
     }
 
@@ -106,26 +112,21 @@ export default function DashboardPage() {
     const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
 
     return (
-        <div className="min-h-screen bg-gray-50 p-4 max-w-2xl mx-auto">
-            <div className="flex justify-between items-center py-4">
-                <h1 className="text-xl font-semibold">Hi, {user?.name}</h1>
-                <button onClick={handleLogout} className="text-sm text-gray-500 underline">
-                    Log out
-                </button>
-            </div>
+        <div className="page">
+            <Header name={user?.name} onLogout={handleLogout} />
 
             {/* Workspaces */}
-            <section className="bg-white rounded-lg shadow p-4 mb-4">
+            <section className="card">
                 <h2 className="font-medium mb-3">Your workspaces</h2>
-                <div className="space-y-2 mb-3">
+                <div className="mb-3">
                     {workspaces.length === 0 && (
-                        <p className="text-sm text-gray-400">No shared workspaces yet.</p>
+                        <p className="muted">No shared workspaces yet.</p>
                     )}
                     {workspaces.map((ws) => (
                         <a
                             key={ws.id}
                             href={`/workspaces/${ws.id}`}
-                            className="block border rounded px-3 py-2 hover:bg-gray-50"
+                            className="workspace-link"
                         >
                             {ws.name}
                         </a>
@@ -138,22 +139,24 @@ export default function DashboardPage() {
                         value={newWorkspaceName}
                         onChange={(e) => setNewWorkspaceName(e.target.value)}
                         required
-                        className="flex-1 border rounded px-3 py-2 text-sm"
+                        className="input"
+                        disabled={creatingWorkspace}
                     />
                     <button
                         type="submit"
-                        className="bg-black text-white px-4 py-2 rounded text-sm"
+                        className="btn btn-primary"
+                        disabled={creatingWorkspace}
                     >
-                        Create
+                        {creatingWorkspace ? "Creating..." : "Create"}
                     </button>
                 </form>
-            </section >
+            </section>
 
             {/* Personal expenses */}
-            < section className="bg-white rounded-lg shadow p-4" >
+            <section className="card">
                 <div className="flex justify-between items-center mb-3">
                     <h2 className="font-medium">Personal expenses</h2>
-                    <span className="text-sm text-gray-500">Total: {total.toFixed(2)}</span>
+                    <span className="muted">Total: {total.toFixed(2)}</span>
                 </div>
 
                 <form onSubmit={handleAddExpense} className="grid grid-cols-3 gap-2 mb-4">
@@ -164,7 +167,7 @@ export default function DashboardPage() {
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
                         required
-                        className="border rounded px-3 py-2 text-sm"
+                        className="input"
                     />
                     <input
                         type="text"
@@ -172,36 +175,34 @@ export default function DashboardPage() {
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
                         required
-                        className="border rounded px-3 py-2 text-sm"
+                        className="input"
                     />
                     <input
                         type="text"
                         placeholder="Category (optional)"
                         value={category}
                         onChange={(e) => setCategory(e.target.value)}
-                        className="border rounded px-3 py-2 text-sm"
+                        className="input"
                     />
                     <button
                         type="submit"
                         disabled={submitting}
-                        className="col-span-3 bg-black text-white rounded py-2 text-sm disabled:opacity-50"
+                        className="btn btn-primary"
+                        style={{ gridColumn: "span 3" }}
                     >
                         {submitting ? "Adding..." : "Add expense"}
                     </button>
                 </form>
 
-                <div className="space-y-1">
+                <div>
                     {expenses.length === 0 && (
-                        <p className="text-sm text-gray-400">No expenses logged yet.</p>
+                        <p className="muted">No expenses logged yet.</p>
                     )}
                     {expenses.map((exp) => (
-                        <div
-                            key={exp.id}
-                            className="flex justify-between text-sm border-b py-2"
-                        >
+                        <div key={exp.id} className="row">
                             <div>
                                 <p>{exp.description}</p>
-                                <p className="text-gray-400 text-xs">
+                                <p className="muted">
                                     {exp.category ?? "—"} · {new Date(exp.date).toLocaleDateString()}
                                 </p>
                             </div>
@@ -209,7 +210,7 @@ export default function DashboardPage() {
                         </div>
                     ))}
                 </div>
-            </section >
-        </div >
+            </section>
+        </div>
     );
 }
