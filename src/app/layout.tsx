@@ -17,10 +17,15 @@ export const metadata = {
   title: "Hisab Kitab",
   description: "Personal and shared expense tracker",
   manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Hisab Kitab",
+  },
 };
 
 export const viewport = {
-  themeColor: "#000000",
+  themeColor: "#0F5C53",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
