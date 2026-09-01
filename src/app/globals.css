@@ -108,3 +108,59 @@ h1, h2, h3 {
 .workspace-link:hover {
   background: var(--color-bg);
 }
+
+/* --- Dashboard layout --- */
+
+.page-wide {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (min-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: 380px 1fr;
+  }
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+
+.stat-box {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 0.75rem;
+}
+
+/* Form grid that collapses to a single column on narrow phones,
+   instead of squeezing 3 inputs into ~110px each */
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+@media (max-width: 480px) {
+  .form-grid-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+@media (max-width: 480px) {
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}

@@ -4,8 +4,32 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/requireUser";
 
 const addMemberSchema = z.object({
-    email: z.string().email(),
+    personId: z.string(),
 });
+
+export async function GET(
+    req: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const { user, errorResponse } = await requireUser();
+    if (!user) return errorResponse;
+
+    const { id: workspaceId } = await params;
+
+    const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
+    });
+    if (!workspace || workspace.ownerId !== user.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    const members = await prisma.workspaceMember.findMany({
+        where: { workspaceId },
+        include: { person: true },
+    });
+
+    return NextResponse.json({ members });
+}
 
 export async function POST(
     req: NextRequest,
@@ -16,52 +40,42 @@ export async function POST(
 
     const { id: workspaceId } = await params;
 
-    // Confirm the requester is actually a member of this workspace
-    const membership = await prisma.workspaceMember.findUnique({
-        where: { workspaceId_userId: { workspaceId, userId: user.id } },
+    const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
     });
-    if (!membership) {
-        return NextResponse.json(
-            { error: "You are not a member of this workspace" },
-            { status: 403 }
-        );
+    if (!workspace || workspace.ownerId !== user.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
     const body = await req.json();
     const parsed = addMemberSchema.safeParse(body);
     if (!parsed.success) {
-        return NextResponse.json(
-            { error: parsed.error.flatten() },
-            { status: 400 }
-        );
+        return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     }
 
-    const targetUser = await prisma.user.findUnique({
-        where: { email: parsed.data.email },
+    const person = await prisma.person.findUnique({
+        where: { id: parsed.data.personId },
     });
-    if (!targetUser) {
-        return NextResponse.json(
-            { error: "No user with that email has signed up yet" },
-            { status: 404 }
-        );
+    if (!person || person.ownerId !== user.id) {
+        return NextResponse.json({ error: "Contact not found" }, { status: 404 });
     }
 
     const existing = await prisma.workspaceMember.findUnique({
         where: {
-            workspaceId_userId: { workspaceId, userId: targetUser.id },
+            workspaceId_personId: { workspaceId, personId: person.id },
         },
     });
     if (existing) {
         return NextResponse.json(
-            { error: "User is already a member of this workspace" },
+            { error: "Already a member of this workspace" },
             { status: 409 }
         );
     }
 
-    const newMember = await prisma.workspaceMember.create({
-        data: { workspaceId, userId: targetUser.id },
-        include: { user: true },
+    const member = await prisma.workspaceMember.create({
+        data: { workspaceId, personId: person.id },
+        include: { person: true },
     });
 
-    return NextResponse.json({ member: newMember });
+    return NextResponse.json({ member });
 }

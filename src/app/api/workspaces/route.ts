@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/requireUser";
 
 const createWorkspaceSchema = z.object({
     name: z.string().min(1),
+    memberPersonIds: z.array(z.string()).optional().default([]),
 });
 
 export async function POST(req: NextRequest) {
@@ -14,20 +15,41 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const parsed = createWorkspaceSchema.safeParse(body);
     if (!parsed.success) {
+        return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    }
+
+    if (!user.selfPersonId) {
         return NextResponse.json(
-            { error: parsed.error.flatten() },
-            { status: 400 }
+            { error: "Account setup incomplete — no self-person found" },
+            { status: 500 }
         );
+    }
+
+    // Confirm any provided contacts actually belong to this user
+    if (parsed.data.memberPersonIds.length > 0) {
+        const count = await prisma.person.count({
+            where: { id: { in: parsed.data.memberPersonIds }, ownerId: user.id },
+        });
+        if (count !== parsed.data.memberPersonIds.length) {
+            return NextResponse.json(
+                { error: "One or more contacts are invalid" },
+                { status: 400 }
+            );
+        }
     }
 
     const workspace = await prisma.workspace.create({
         data: {
+            ownerId: user.id,
             name: parsed.data.name,
             members: {
-                create: { userId: user.id },
+                create: [
+                    { personId: user.selfPersonId }, // you're always a member
+                    ...parsed.data.memberPersonIds.map((personId) => ({ personId })),
+                ],
             },
         },
-        include: { members: { include: { user: true } } },
+        include: { members: { include: { person: true } } },
     });
 
     return NextResponse.json({ workspace });
@@ -38,8 +60,9 @@ export async function GET() {
     if (!user) return errorResponse;
 
     const workspaces = await prisma.workspace.findMany({
-        where: { members: { some: { userId: user.id } } },
-        include: { members: { include: { user: true } } },
+        where: { ownerId: user.id },
+        include: { members: { include: { person: true } } },
+        orderBy: { createdAt: "desc" },
     });
 
     return NextResponse.json({ workspaces });

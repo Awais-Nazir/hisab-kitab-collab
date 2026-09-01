@@ -3,18 +3,18 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/requireUser";
 
-const splitEntrySchema = z.object({
-    userId: z.string(),
-    shareAmount: z.number().nonnegative(),
+const shareEntrySchema = z.object({
+    personId: z.string(),
+    amount: z.number().nonnegative(),
 });
 
-const createWorkspaceExpenseSchema = z.object({
+const createExpenseSchema = z.object({
     amount: z.number().positive(),
     description: z.string().min(1),
     category: z.string().optional(),
     date: z.string().optional(),
-    paidById: z.string(),
-    splits: z.array(splitEntrySchema).min(1),
+    splits: z.array(shareEntrySchema).min(1),
+    payments: z.array(shareEntrySchema).min(1),
 });
 
 export async function POST(
@@ -26,54 +26,50 @@ export async function POST(
 
     const { id: workspaceId } = await params;
 
-    const membership = await prisma.workspaceMember.findUnique({
-        where: { workspaceId_userId: { workspaceId, userId: user.id } },
+    const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
     });
-    if (!membership) {
-        return NextResponse.json(
-            { error: "You are not a member of this workspace" },
-            { status: 403 }
-        );
+    if (!workspace || workspace.ownerId !== user.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
     const body = await req.json();
-    const parsed = createWorkspaceExpenseSchema.safeParse(body);
+    const parsed = createExpenseSchema.safeParse(body);
     if (!parsed.success) {
-        return NextResponse.json(
-            { error: parsed.error.flatten() },
-            { status: 400 }
-        );
+        return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { amount, description, category, date, paidById, splits } =
-        parsed.data;
+    const { amount, description, category, date, splits, payments } = parsed.data;
 
-    // Validate: splits must sum exactly to amount
-    const splitSum = splits.reduce((sum, s) => sum + s.shareAmount, 0);
+    const splitSum = splits.reduce((s, x) => s + x.amount, 0);
     if (Math.abs(splitSum - amount) > 0.01) {
         return NextResponse.json(
-            {
-                error: `Splits sum to ${splitSum.toFixed(
-                    2
-                )} but expense amount is ${amount.toFixed(2)}`,
-            },
+            { error: `Splits sum to ${splitSum.toFixed(2)} but expense is ${amount.toFixed(2)}` },
             { status: 400 }
         );
     }
 
-    // Validate: paidById and all split userIds must be workspace members
+    const paymentSum = payments.reduce((s, x) => s + x.amount, 0);
+    if (Math.abs(paymentSum - amount) > 0.01) {
+        return NextResponse.json(
+            { error: `Payments sum to ${paymentSum.toFixed(2)} but expense is ${amount.toFixed(2)}` },
+            { status: 400 }
+        );
+    }
+
     const memberIds = (
         await prisma.workspaceMember.findMany({
             where: { workspaceId },
-            select: { userId: true },
+            select: { personId: true },
         })
-    ).map((m) => m.userId);
+    ).map((m) => m.personId);
 
-    const allParticipants = [paidById, ...splits.map((s) => s.userId)];
-    const invalidParticipant = allParticipants.find(
-        (id) => !memberIds.includes(id)
-    );
-    if (invalidParticipant) {
+    const allParticipants = [
+        ...splits.map((s) => s.personId),
+        ...payments.map((p) => p.personId),
+    ];
+    const invalid = allParticipants.find((id) => !memberIds.includes(id));
+    if (invalid) {
         return NextResponse.json(
             { error: "All participants must be members of this workspace" },
             { status: 400 }
@@ -87,15 +83,17 @@ export async function POST(
             category,
             date: date ? new Date(date) : new Date(),
             workspaceId,
-            paidById,
             splits: {
-                create: splits.map((s) => ({
-                    userId: s.userId,
-                    shareAmount: s.shareAmount,
-                })),
+                create: splits.map((s) => ({ personId: s.personId, shareAmount: s.amount })),
+            },
+            payments: {
+                create: payments.map((p) => ({ personId: p.personId, amountPaid: p.amount })),
             },
         },
-        include: { splits: { include: { user: true } }, paidBy: true },
+        include: {
+            splits: { include: { person: true } },
+            payments: { include: { person: true } },
+        },
     });
 
     return NextResponse.json({ expense });
@@ -110,19 +108,19 @@ export async function GET(
 
     const { id: workspaceId } = await params;
 
-    const membership = await prisma.workspaceMember.findUnique({
-        where: { workspaceId_userId: { workspaceId, userId: user.id } },
+    const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
     });
-    if (!membership) {
-        return NextResponse.json(
-            { error: "You are not a member of this workspace" },
-            { status: 403 }
-        );
+    if (!workspace || workspace.ownerId !== user.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
     const expenses = await prisma.expense.findMany({
         where: { workspaceId },
-        include: { splits: { include: { user: true } }, paidBy: true },
+        include: {
+            splits: { include: { person: true } },
+            payments: { include: { person: true } },
+        },
         orderBy: { date: "desc" },
     });
 

@@ -4,68 +4,160 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 
-type User = { id: string; email: string; name: string };
-type Member = { userId: string; user: User };
-type Split = { userId: string; shareAmount: string; user: User };
+type Person = { id: string; name: string; email: string | null; isSelf?: boolean };
+type Member = { personId: string; person: Person };
+type ShareEntry = { personId: string; amount: string };
+type Split = { personId: string; shareAmount: string; person: Person };
+type Payment = { personId: string; amountPaid: string; person: Person };
 type Expense = {
     id: string;
     amount: string;
     description: string;
     category: string | null;
     date: string;
-    paidBy: User;
     splits: Split[];
+    payments: Payment[];
 };
-type Balance = { userId: string; name: string; netBalance: number };
+type Balance = { personId: string; name: string; isSelf: boolean; netBalance: number };
+
+function ShareEditor({
+    title,
+    members,
+    selected,
+    setSelected,
+    mode,
+    setMode,
+    customAmounts,
+    setCustomAmounts,
+}: {
+    title: string;
+    members: Member[];
+    selected: Set<string>;
+    setSelected: (s: Set<string>) => void;
+    mode: "equal" | "custom";
+    setMode: (m: "equal" | "custom") => void;
+    customAmounts: Record<string, string>;
+    setCustomAmounts: (fn: (prev: Record<string, string>) => Record<string, string>) => void;
+}) {
+    function toggle(personId: string) {
+        const next = new Set(selected);
+        if (next.has(personId)) next.delete(personId);
+        else next.add(personId);
+        setSelected(next);
+    }
+
+    return (
+        <div style={{ border: "1px solid var(--color-border)", borderRadius: "10px", padding: "0.75rem" }}>
+            <p className="form-label" style={{ marginBottom: "0.5rem" }}>{title}</p>
+            <div className="flex gap-3" style={{ marginBottom: "0.5rem" }}>
+                {members.map((m) => (
+                    <label key={m.personId} className="flex items-center gap-1">
+                        <input type="checkbox" checked={selected.has(m.personId)} onChange={() => toggle(m.personId)} />
+                        {m.person.isSelf ? "You" : m.person.name}
+                    </label>
+                ))}
+            </div>
+            <div className="flex gap-3" style={{ marginBottom: "0.5rem" }}>
+                <label className="flex items-center gap-1">
+                    <input type="radio" checked={mode === "equal"} onChange={() => setMode("equal")} />
+                    Equal
+                </label>
+                <label className="flex items-center gap-1">
+                    <input type="radio" checked={mode === "custom"} onChange={() => setMode("custom")} />
+                    Custom
+                </label>
+            </div>
+            {mode === "custom" && (
+                <div className="flex flex-col gap-2">
+                    {Array.from(selected).map((personId) => {
+                        const member = members.find((m) => m.personId === personId);
+                        return (
+                            <div key={personId} className="flex items-center gap-2">
+                                <span style={{ width: "6rem" }}>
+                                    {member?.person.isSelf ? "You" : member?.person.name}
+                                </span>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    placeholder="Amount"
+                                    value={customAmounts[personId] || ""}
+                                    onChange={(e) =>
+                                        setCustomAmounts((prev) => ({ ...prev, [personId]: e.target.value }))
+                                    }
+                                    className="input"
+                                    style={{ flex: 1 }}
+                                />
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function computeShares(
+    total: number,
+    selected: Set<string>,
+    mode: "equal" | "custom",
+    customAmounts: Record<string, string>
+): ShareEntry[] {
+    const ids = Array.from(selected);
+    if (mode === "equal") {
+        const share = Math.round((total / ids.length) * 100) / 100;
+        return ids.map((personId, idx) => {
+            const isLast = idx === ids.length - 1;
+            const amt = isLast ? Math.round((total - share * (ids.length - 1)) * 100) / 100 : share;
+            return { personId, amount: amt.toString() };
+        });
+    }
+    return ids.map((personId) => ({ personId, amount: customAmounts[personId] || "0" }));
+}
 
 export default function WorkspacePage() {
     const params = useParams();
     const router = useRouter();
     const workspaceId = params.id as string;
 
-    const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [members, setMembers] = useState<Member[]>([]);
+    const [contacts, setContacts] = useState<Person[]>([]);
     const [expenses, setExpenses] = useState<Expense[]>([]);
     const [balances, setBalances] = useState<Balance[]>([]);
     const [loading, setLoading] = useState(true);
 
-    // Add member form
-    const [inviteEmail, setInviteEmail] = useState("");
-    const [inviting, setInviting] = useState(false);
+    // Add member
+    const [selectedContactId, setSelectedContactId] = useState("");
+    const [addingMember, setAddingMember] = useState(false);
 
-    // Add expense form
+    // Expense form
     const [amount, setAmount] = useState("");
     const [description, setDescription] = useState("");
     const [category, setCategory] = useState("");
-    const [paidById, setPaidById] = useState("");
-    const [splitWith, setSplitWith] = useState<Set<string>>(new Set());
+    const [splitSelected, setSplitSelected] = useState<Set<string>>(new Set());
     const [splitMode, setSplitMode] = useState<"equal" | "custom">("equal");
-    const [customShares, setCustomShares] = useState<Record<string, string>>({});
+    const [splitCustom, setSplitCustom] = useState<Record<string, string>>({});
+    const [paySelected, setPaySelected] = useState<Set<string>>(new Set());
+    const [payMode, setPayMode] = useState<"equal" | "custom">("equal");
+    const [payCustom, setPayCustom] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState(false);
+
+    // Settle form
+    const [settleFrom, setSettleFrom] = useState("");
+    const [settleTo, setSettleTo] = useState("");
+    const [settleAmount, setSettleAmount] = useState("");
     const [settling, setSettling] = useState(false);
 
     async function loadAll() {
-        const [meRes, expensesRes, balancesRes] = await Promise.all([
-            apiFetch<{ user: User }>("/api/auth/me"),
-            apiFetch<{ expenses: Expense[] }>(
-                `/api/workspaces/${workspaceId}/expenses`
-            ),
-            apiFetch<{ balances: Balance[] }>(
-                `/api/workspaces/${workspaceId}/balances`
-            ),
+        const [membersRes, contactsRes, expensesRes, balancesRes] = await Promise.all([
+            apiFetch<{ members: Member[] }>(`/api/workspaces/${workspaceId}/members`),
+            apiFetch<{ people: Person[] }>("/api/people"),
+            apiFetch<{ expenses: Expense[] }>(`/api/workspaces/${workspaceId}/expenses`),
+            apiFetch<{ balances: Balance[] }>(`/api/workspaces/${workspaceId}/balances`),
         ]);
-        setCurrentUser(meRes.user);
+        setMembers(membersRes.members);
+        setContacts(contactsRes.people);
         setExpenses(expensesRes.expenses);
         setBalances(balancesRes.balances);
-        // Members list is derived from balances (every member has a balance row,
-        // including zero), so this stays a single source of truth instead of a
-        // separate unused fetch.
-        setMembers(
-            balancesRes.balances.map((b) => ({
-                userId: b.userId,
-                user: { id: b.userId, name: b.name, email: "" },
-            }))
-        );
     }
 
     useEffect(() => {
@@ -75,60 +167,38 @@ export default function WorkspacePage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [workspaceId]);
 
-    async function handleInvite(e: React.FormEvent) {
+    const availableContacts = contacts.filter(
+        (c) => !members.some((m) => m.personId === c.id)
+    );
+
+    async function handleAddMember(e: React.FormEvent) {
         e.preventDefault();
-        if (inviting) return;
-        setInviting(true);
+        if (addingMember || !selectedContactId) return;
+        setAddingMember(true);
         try {
             await apiFetch(`/api/workspaces/${workspaceId}/members`, {
                 method: "POST",
-                body: JSON.stringify({ email: inviteEmail }),
+                body: JSON.stringify({ personId: selectedContactId }),
             });
-            setInviteEmail("");
+            setSelectedContactId("");
             await loadAll();
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to add member");
         } finally {
-            setInviting(false);
+            setAddingMember(false);
         }
-    }
-
-    function toggleSplitMember(userId: string) {
-        setSplitWith((prev) => {
-            const next = new Set(prev);
-            if (next.has(userId)) next.delete(userId);
-            else next.add(userId);
-            return next;
-        });
     }
 
     async function handleAddExpense(e: React.FormEvent) {
         e.preventDefault();
         if (submitting) return;
-        if (!paidById || splitWith.size === 0) {
-            alert("Choose who paid and who is splitting this expense");
+        if (splitSelected.size === 0 || paySelected.size === 0) {
+            alert("Choose who this was split with and who paid");
             return;
         }
-
         const total = parseFloat(amount);
-        let splits: { userId: string; shareAmount: number }[];
-
-        if (splitMode === "equal") {
-            const participantIds = Array.from(splitWith);
-            const share = Math.round((total / participantIds.length) * 100) / 100;
-            splits = participantIds.map((userId, idx) => {
-                const isLast = idx === participantIds.length - 1;
-                const assigned = isLast
-                    ? Math.round((total - share * (participantIds.length - 1)) * 100) / 100
-                    : share;
-                return { userId, shareAmount: assigned };
-            });
-        } else {
-            splits = Array.from(splitWith).map((userId) => ({
-                userId,
-                shareAmount: parseFloat(customShares[userId] || "0"),
-            }));
-        }
+        const splits = computeShares(total, splitSelected, splitMode, splitCustom);
+        const payments = computeShares(total, paySelected, payMode, payCustom);
 
         setSubmitting(true);
         try {
@@ -140,8 +210,8 @@ export default function WorkspacePage() {
                         amount: total,
                         description,
                         category: category || undefined,
-                        paidById,
-                        splits,
+                        splits: splits.map((s) => ({ personId: s.personId, amount: parseFloat(s.amount) })),
+                        payments: payments.map((p) => ({ personId: p.personId, amount: parseFloat(p.amount) })),
                     }),
                 }
             );
@@ -149,8 +219,10 @@ export default function WorkspacePage() {
             setAmount("");
             setDescription("");
             setCategory("");
-            setSplitWith(new Set());
-            setCustomShares({});
+            setSplitSelected(new Set());
+            setSplitCustom({});
+            setPaySelected(new Set());
+            setPayCustom({});
             const balancesRes = await apiFetch<{ balances: Balance[] }>(
                 `/api/workspaces/${workspaceId}/balances`
             );
@@ -162,21 +234,22 @@ export default function WorkspacePage() {
         }
     }
 
-    async function handleSettle(toUserId: string, amountDue: number) {
-        const input = prompt(
-            `How much are you paying? (owed: ${amountDue.toFixed(2)})`,
-            Math.abs(amountDue).toFixed(2)
-        );
-        if (!input) return;
+    async function handleSettle(e: React.FormEvent) {
+        e.preventDefault();
+        if (settling || !settleFrom || !settleTo || settleFrom === settleTo) return;
         setSettling(true);
         try {
             await apiFetch(`/api/workspaces/${workspaceId}/settlements`, {
                 method: "POST",
                 body: JSON.stringify({
-                    toUserId,
-                    amount: parseFloat(input),
+                    fromPersonId: settleFrom,
+                    toPersonId: settleTo,
+                    amount: parseFloat(settleAmount),
                 }),
             });
+            setSettleFrom("");
+            setSettleTo("");
+            setSettleAmount("");
             const balancesRes = await apiFetch<{ balances: Balance[] }>(
                 `/api/workspaces/${workspaceId}/balances`
             );
@@ -199,72 +272,88 @@ export default function WorkspacePage() {
             {/* Balances */}
             <section className="card">
                 <h2 className="font-medium mb-3">Balances</h2>
-                <div>
-                    {balances.map((b) => (
-                        <div key={b.userId} className="row">
-                            <span>
-                                {b.name} {b.userId === currentUser?.id && "(you)"}
-                            </span>
-                            <div className="flex items-center gap-2">
-                                <span
-                                    className={
-                                        b.netBalance > 0
-                                            ? "balance-positive"
-                                            : b.netBalance < 0
-                                                ? "balance-negative"
-                                                : "muted"
-                                    }
-                                >
-                                    {b.netBalance > 0 ? "+" : ""}
-                                    {b.netBalance.toFixed(2)}
-                                </span>
-                                {b.netBalance < 0 && b.userId === currentUser?.id && (
-                                    <button
-                                        onClick={() => {
-                                            const creditor = balances.find((x) => x.netBalance > 0);
-                                            if (creditor) handleSettle(creditor.userId, b.netBalance);
-                                        }}
-                                        disabled={settling}
-                                        className="btn-text"
-                                        style={{ fontSize: "0.8rem" }}
-                                    >
-                                        {settling ? "Settling..." : "Settle"}
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </div>
+                {balances.map((b) => (
+                    <div key={b.personId} className="row">
+                        <span>{b.isSelf ? "You" : b.name}</span>
+                        <span className={b.netBalance > 0 ? "balance-positive" : b.netBalance < 0 ? "balance-negative" : "muted"}>
+                            {b.netBalance > 0 ? "+" : ""}
+                            {b.netBalance.toFixed(2)}
+                        </span>
+                    </div>
+                ))}
                 <p className="muted" style={{ marginTop: "0.75rem" }}>
-                    Positive = owed to you. Negative = you owe.
+                    Positive = owed money. Negative = owes money.
                 </p>
+            </section>
+
+            {/* Settle up */}
+            <section className="card">
+                <h2 className="font-medium mb-3">Record a settlement</h2>
+                <form onSubmit={handleSettle} className="flex flex-col gap-2">
+                    <div className="grid grid-cols-2 gap-2">
+                        <select value={settleFrom} onChange={(e) => setSettleFrom(e.target.value)} required className="input">
+                            <option value="">From...</option>
+                            {members.map((m) => (
+                                <option key={m.personId} value={m.personId}>
+                                    {m.person.isSelf ? "You" : m.person.name}
+                                </option>
+                            ))}
+                        </select>
+                        <select value={settleTo} onChange={(e) => setSettleTo(e.target.value)} required className="input">
+                            <option value="">To...</option>
+                            {members.map((m) => (
+                                <option key={m.personId} value={m.personId}>
+                                    {m.person.isSelf ? "You" : m.person.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <input
+                        type="number"
+                        step="0.01"
+                        placeholder="Amount"
+                        value={settleAmount}
+                        onChange={(e) => setSettleAmount(e.target.value)}
+                        required
+                        className="input"
+                    />
+                    <button type="submit" disabled={settling} className="btn btn-primary">
+                        {settling ? "Recording..." : "Record settlement"}
+                    </button>
+                </form>
             </section>
 
             {/* Members */}
             <section className="card">
                 <h2 className="font-medium mb-3">Members</h2>
-                <div style={{ marginBottom: "0.75rem" }}>
-                    {members.map((m) => (
-                        <p key={m.userId} style={{ padding: "0.25rem 0" }}>
-                            {m.user.name}
-                        </p>
-                    ))}
-                </div>
-                <form onSubmit={handleInvite} className="flex gap-2">
-                    <input
-                        type="email"
-                        placeholder="Add member by email"
-                        value={inviteEmail}
-                        onChange={(e) => setInviteEmail(e.target.value)}
-                        required
-                        disabled={inviting}
+                {members.map((m) => (
+                    <p key={m.personId} style={{ padding: "0.25rem 0" }}>
+                        {m.person.isSelf ? "You" : m.person.name}
+                    </p>
+                ))}
+                <form onSubmit={handleAddMember} className="flex gap-2" style={{ marginTop: "0.75rem" }}>
+                    <select
+                        value={selectedContactId}
+                        onChange={(e) => setSelectedContactId(e.target.value)}
                         className="input"
                         style={{ flex: 1 }}
-                    />
-                    <button type="submit" disabled={inviting} className="btn btn-primary">
-                        {inviting ? "Adding..." : "Add"}
+                    >
+                        <option value="">Select a contact...</option>
+                        {availableContacts.map((c) => (
+                            <option key={c.id} value={c.id}>
+                                {c.name}
+                            </option>
+                        ))}
+                    </select>
+                    <button type="submit" disabled={addingMember || !selectedContactId} className="btn btn-primary">
+                        {addingMember ? "Adding..." : "Add"}
                     </button>
                 </form>
+                {availableContacts.length === 0 && contacts.length === 0 && (
+                    <p className="muted" style={{ marginTop: "0.5rem" }}>
+                        No contacts yet — <a href="/people" style={{ color: "var(--color-primary)" }}>add some first</a>.
+                    </p>
+                )}
             </section>
 
             {/* Add expense */}
@@ -272,125 +361,34 @@ export default function WorkspacePage() {
                 <h2 className="font-medium mb-3">Add shared expense</h2>
                 <form onSubmit={handleAddExpense} className="flex flex-col gap-3">
                     <div className="grid grid-cols-2 gap-2">
-                        <input
-                            type="number"
-                            step="0.01"
-                            placeholder="Amount"
-                            value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                            required
-                            className="input"
-                        />
-                        <input
-                            type="text"
-                            placeholder="Description"
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            required
-                            className="input"
-                        />
+                        <input type="number" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} required className="input" />
+                        <input type="text" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required className="input" />
                     </div>
-                    <input
-                        type="text"
-                        placeholder="Category (optional)"
-                        value={category}
-                        onChange={(e) => setCategory(e.target.value)}
-                        className="input"
+                    <input type="text" placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} className="input" />
+
+                    <ShareEditor
+                        title="Split with (who consumed this)"
+                        members={members}
+                        selected={splitSelected}
+                        setSelected={setSplitSelected}
+                        mode={splitMode}
+                        setMode={setSplitMode}
+                        customAmounts={splitCustom}
+                        setCustomAmounts={setSplitCustom}
                     />
 
-                    <div>
-                        <label className="muted" style={{ display: "block", marginBottom: "0.35rem" }}>
-                            Paid by
-                        </label>
-                        <select
-                            value={paidById}
-                            onChange={(e) => setPaidById(e.target.value)}
-                            required
-                            className="input"
-                        >
-                            <option value="">Select...</option>
-                            {members.map((m) => (
-                                <option key={m.userId} value={m.userId}>
-                                    {m.user.name}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                    <ShareEditor
+                        title="Paid by (who fronted the cash)"
+                        members={members}
+                        selected={paySelected}
+                        setSelected={setPaySelected}
+                        mode={payMode}
+                        setMode={setPayMode}
+                        customAmounts={payCustom}
+                        setCustomAmounts={setPayCustom}
+                    />
 
-                    <div>
-                        <label className="muted" style={{ display: "block", marginBottom: "0.35rem" }}>
-                            Split with
-                        </label>
-                        <div className="flex gap-3">
-                            {members.map((m) => (
-                                <label key={m.userId} className="flex items-center gap-1">
-                                    <input
-                                        type="checkbox"
-                                        checked={splitWith.has(m.userId)}
-                                        onChange={() => toggleSplitMember(m.userId)}
-                                    />
-                                    {m.user.name}
-                                </label>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="muted" style={{ display: "block", marginBottom: "0.35rem" }}>
-                            Split type
-                        </label>
-                        <div className="flex gap-3">
-                            <label className="flex items-center gap-1">
-                                <input
-                                    type="radio"
-                                    checked={splitMode === "equal"}
-                                    onChange={() => setSplitMode("equal")}
-                                />
-                                Equal
-                            </label>
-                            <label className="flex items-center gap-1">
-                                <input
-                                    type="radio"
-                                    checked={splitMode === "custom"}
-                                    onChange={() => setSplitMode("custom")}
-                                />
-                                Custom
-                            </label>
-                        </div>
-                    </div>
-
-                    {splitMode === "custom" && (
-                        <div className="flex flex-col gap-2">
-                            {Array.from(splitWith).map((userId) => {
-                                const member = members.find((m) => m.userId === userId);
-                                return (
-                                    <div key={userId} className="flex items-center gap-2">
-                                        <span style={{ width: "6rem" }}>{member?.user.name}</span>
-                                        <input
-                                            type="number"
-                                            step="0.01"
-                                            placeholder="Share"
-                                            value={customShares[userId] || ""}
-                                            onChange={(e) =>
-                                                setCustomShares((prev) => ({
-                                                    ...prev,
-                                                    [userId]: e.target.value,
-                                                }))
-                                            }
-                                            className="input"
-                                            style={{ flex: 1 }}
-                                        />
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-
-                    <button
-                        type="submit"
-                        disabled={submitting}
-                        className="btn btn-primary"
-                    >
+                    <button type="submit" disabled={submitting} className="btn btn-primary">
                         {submitting ? "Adding..." : "Add expense"}
                     </button>
                 </form>
@@ -400,23 +398,21 @@ export default function WorkspacePage() {
             <section className="card">
                 <h2 className="font-medium mb-3">Expenses</h2>
                 {expenses.length === 0 && <p className="muted">No expenses logged yet.</p>}
-                <div>
-                    {expenses.map((exp) => (
-                        <div key={exp.id} className="row" style={{ flexDirection: "column", alignItems: "stretch" }}>
-                            <div className="flex justify-between">
-                                <span>{exp.description}</span>
-                                <span>{Number(exp.amount).toFixed(2)}</span>
-                            </div>
-                            <p className="muted">
-                                Paid by {exp.paidBy.name} ·{" "}
-                                {new Date(exp.date).toLocaleDateString()}
-                            </p>
-                            <p className="muted">
-                                Split: {exp.splits.map((s) => `${s.user.name} ${Number(s.shareAmount).toFixed(2)}`).join(", ")}
-                            </p>
+                {expenses.map((exp) => (
+                    <div key={exp.id} className="row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                        <div className="flex justify-between">
+                            <span>{exp.description}</span>
+                            <span>{Number(exp.amount).toFixed(2)}</span>
                         </div>
-                    ))}
-                </div>
+                        <p className="muted">{new Date(exp.date).toLocaleDateString()}</p>
+                        <p className="muted">
+                            Paid: {exp.payments.map((p) => `${p.person.isSelf ? "You" : p.person.name} ${Number(p.amountPaid).toFixed(2)}`).join(", ")}
+                        </p>
+                        <p className="muted">
+                            Split: {exp.splits.map((s) => `${s.person.isSelf ? "You" : s.person.name} ${Number(s.shareAmount).toFixed(2)}`).join(", ")}
+                        </p>
+                    </div>
+                ))}
             </section>
         </div>
     );

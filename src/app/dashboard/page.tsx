@@ -14,21 +14,23 @@ type Expense = {
     category: string | null;
     date: string;
 };
+type DayStat = { count: number; total: number };
+type PersonNet = { personId: string; name: string; netBalance: number };
+type Overview = { today: DayStat; yesterday: DayStat; netByPerson: PersonNet[] };
 
 export default function DashboardPage() {
     const router = useRouter();
     const [user, setUser] = useState<User | null>(null);
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
     const [expenses, setExpenses] = useState<Expense[]>([]);
+    const [overview, setOverview] = useState<Overview | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // New personal expense form state
     const [amount, setAmount] = useState("");
     const [description, setDescription] = useState("");
     const [category, setCategory] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
-    // New workspace form state
     const [newWorkspaceName, setNewWorkspaceName] = useState("");
     const [creatingWorkspace, setCreatingWorkspace] = useState(false);
 
@@ -38,12 +40,14 @@ export default function DashboardPage() {
                 const meRes = await apiFetch<{ user: User }>("/api/auth/me");
                 setUser(meRes.user);
 
-                const [wsRes, expRes] = await Promise.all([
+                const [wsRes, expRes, overviewRes] = await Promise.all([
                     apiFetch<{ workspaces: Workspace[] }>("/api/workspaces"),
                     apiFetch<{ expenses: Expense[] }>("/api/expenses/personal"),
+                    apiFetch<Overview>("/api/stats/overview"),
                 ]);
                 setWorkspaces(wsRes.workspaces);
                 setExpenses(expRes.expenses);
+                setOverview(overviewRes);
             } catch {
                 router.push("/login");
             } finally {
@@ -52,6 +56,15 @@ export default function DashboardPage() {
         }
         load();
     }, [router]);
+
+    async function refreshOverview() {
+        try {
+            const res = await apiFetch<Overview>("/api/stats/overview");
+            setOverview(res);
+        } catch {
+            // non-critical
+        }
+    }
 
     async function handleAddExpense(e: React.FormEvent) {
         e.preventDefault();
@@ -72,6 +85,7 @@ export default function DashboardPage() {
             setAmount("");
             setDescription("");
             setCategory("");
+            await refreshOverview();
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to add expense");
         } finally {
@@ -81,7 +95,7 @@ export default function DashboardPage() {
 
     async function handleCreateWorkspace(e: React.FormEvent) {
         e.preventDefault();
-        if (creatingWorkspace) return; // guard against double-submit even if click lands twice fast
+        if (creatingWorkspace) return;
         setCreatingWorkspace(true);
         try {
             const res = await apiFetch<{ workspace: Workspace }>(
@@ -110,107 +124,132 @@ export default function DashboardPage() {
     }
 
     const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+    const owedToYou = overview?.netByPerson.filter((p) => p.netBalance > 0) ?? [];
+    const youOwe = overview?.netByPerson.filter((p) => p.netBalance < 0) ?? [];
 
     return (
-        <div className="page">
+        <div className="page-wide">
             <Header name={user?.name} onLogout={handleLogout} />
 
-            {/* Workspaces */}
-            <section className="card">
-                <h2 className="font-medium mb-3">Your workspaces</h2>
-                <div className="mb-3">
-                    {workspaces.length === 0 && (
-                        <p className="muted">No shared workspaces yet.</p>
-                    )}
-                    {workspaces.map((ws) => (
-                        <a
-                            key={ws.id}
-                            href={`/workspaces/${ws.id}`}
-                            className="workspace-link"
-                        >
-                            {ws.name}
-                        </a>
-                    ))}
-                </div>
-                <form onSubmit={handleCreateWorkspace} className="flex gap-2">
-                    <input
-                        type="text"
-                        placeholder="New workspace name (e.g. Me & Razaq)"
-                        value={newWorkspaceName}
-                        onChange={(e) => setNewWorkspaceName(e.target.value)}
-                        required
-                        className="input"
-                        disabled={creatingWorkspace}
-                    />
-                    <button
-                        type="submit"
-                        className="btn btn-primary"
-                        disabled={creatingWorkspace}
-                    >
-                        {creatingWorkspace ? "Creating..." : "Create"}
-                    </button>
-                </form>
-            </section>
+            <a href="/people" className="muted" style={{ display: "inline-block", marginBottom: "1rem" }}>
+                Manage contacts →
+            </a>
 
-            {/* Personal expenses */}
-            <section className="card">
-                <div className="flex justify-between items-center mb-3">
-                    <h2 className="font-medium">Personal expenses</h2>
-                    <span className="muted">Total: {total.toFixed(2)}</span>
-                </div>
-
-                <form onSubmit={handleAddExpense} className="grid grid-cols-3 gap-2 mb-4">
-                    <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Amount"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        required
-                        className="input"
-                    />
-                    <input
-                        type="text"
-                        placeholder="Description"
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                        required
-                        className="input"
-                    />
-                    <input
-                        type="text"
-                        placeholder="Category (optional)"
-                        value={category}
-                        onChange={(e) => setCategory(e.target.value)}
-                        className="input"
-                    />
-                    <button
-                        type="submit"
-                        disabled={submitting}
-                        className="btn btn-primary"
-                        style={{ gridColumn: "span 3" }}
-                    >
-                        {submitting ? "Adding..." : "Add expense"}
-                    </button>
-                </form>
-
+            <div className="dashboard-grid">
+                {/* Left column: stats + workspaces */}
                 <div>
-                    {expenses.length === 0 && (
-                        <p className="muted">No expenses logged yet.</p>
-                    )}
-                    {expenses.map((exp) => (
-                        <div key={exp.id} className="row">
-                            <div>
-                                <p>{exp.description}</p>
-                                <p className="muted">
-                                    {exp.category ?? "—"} · {new Date(exp.date).toLocaleDateString()}
+                    <section className="card">
+                        <h2 className="font-medium mb-3">Overview</h2>
+                        <div className="stat-grid" style={{ marginBottom: "1rem" }}>
+                            <div className="stat-box">
+                                <p className="muted" style={{ margin: 0 }}>Today (your share)</p>
+                                <p style={{ margin: "0.25rem 0 0", fontSize: "1.1rem", fontWeight: 600 }}>
+                                    {overview?.today.total.toFixed(2) ?? "0.00"}
+                                </p>
+                                <p className="muted" style={{ margin: 0 }}>
+                                    {overview?.today.count ?? 0} {overview?.today.count === 1 ? "expense" : "expenses"}
                                 </p>
                             </div>
-                            <span>{Number(exp.amount).toFixed(2)}</span>
+                            <div className="stat-box">
+                                <p className="muted" style={{ margin: 0 }}>Yesterday (your share)</p>
+                                <p style={{ margin: "0.25rem 0 0", fontSize: "1.1rem", fontWeight: 600 }}>
+                                    {overview?.yesterday.total.toFixed(2) ?? "0.00"}
+                                </p>
+                                <p className="muted" style={{ margin: 0 }}>
+                                    {overview?.yesterday.count ?? 0} {overview?.yesterday.count === 1 ? "expense" : "expenses"}
+                                </p>
+                            </div>
                         </div>
-                    ))}
+
+                        {owedToYou.length === 0 && youOwe.length === 0 ? (
+                            <p className="muted">All settled up — nobody owes anybody anything.</p>
+                        ) : (
+                            <>
+                                {owedToYou.length > 0 && (
+                                    <div style={{ marginBottom: "0.5rem" }}>
+                                        <p className="muted" style={{ marginBottom: "0.25rem" }}>You&apos;ll get</p>
+                                        {owedToYou.map((p) => (
+                                            <div key={p.personId} className="row">
+                                                <span>{p.name}</span>
+                                                <span className="balance-positive">+{p.netBalance.toFixed(2)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {youOwe.length > 0 && (
+                                    <div>
+                                        <p className="muted" style={{ marginBottom: "0.25rem" }}>You owe</p>
+                                        {youOwe.map((p) => (
+                                            <div key={p.personId} className="row">
+                                                <span>{p.name}</span>
+                                                <span className="balance-negative">{p.netBalance.toFixed(2)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </section>
+
+                    <section className="card">
+                        <h2 className="font-medium mb-3">Your workspaces</h2>
+                        <div className="mb-3">
+                            {workspaces.length === 0 && <p className="muted">No shared workspaces yet.</p>}
+                            {workspaces.map((ws) => (
+                                <a key={ws.id} href={`/workspaces/${ws.id}`} className="workspace-link">
+                                    {ws.name}
+                                </a>
+                            ))}
+                        </div>
+                        <form onSubmit={handleCreateWorkspace} className="flex gap-2">
+                            <input
+                                type="text"
+                                placeholder="New workspace (e.g. Me & Razaq)"
+                                value={newWorkspaceName}
+                                onChange={(e) => setNewWorkspaceName(e.target.value)}
+                                required
+                                className="input"
+                                disabled={creatingWorkspace}
+                            />
+                            <button type="submit" className="btn btn-primary" disabled={creatingWorkspace}>
+                                {creatingWorkspace ? "..." : "Create"}
+                            </button>
+                        </form>
+                    </section>
                 </div>
-            </section>
+
+                {/* Right column: personal expenses */}
+                <section className="card">
+                    <div className="flex justify-between items-center mb-3">
+                        <h2 className="font-medium">Personal expenses</h2>
+                        <span className="muted">Total: {total.toFixed(2)}</span>
+                    </div>
+
+                    <form onSubmit={handleAddExpense} className="form-grid-3" style={{ marginBottom: "1rem" }}>
+                        <input type="number" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} required className="input" />
+                        <input type="text" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required className="input" />
+                        <input type="text" placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} className="input" />
+                        <button type="submit" disabled={submitting} className="btn btn-primary" style={{ gridColumn: "1 / -1" }}>
+                            {submitting ? "Adding..." : "Add expense"}
+                        </button>
+                    </form>
+
+                    <div>
+                        {expenses.length === 0 && <p className="muted">No expenses logged yet.</p>}
+                        {expenses.map((exp) => (
+                            <div key={exp.id} className="row">
+                                <div>
+                                    <p style={{ margin: 0 }}>{exp.description}</p>
+                                    <p className="muted">
+                                        {exp.category ?? "—"} · {new Date(exp.date).toLocaleDateString()}
+                                    </p>
+                                </div>
+                                <span>{Number(exp.amount).toFixed(2)}</span>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            </div>
         </div>
     );
 }
