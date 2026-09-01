@@ -13,15 +13,13 @@ export async function GET(req: NextRequest) {
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
-    const users = await prisma.user.findMany({
-        include: {
-            workspaces: { include: { workspace: true } },
-        },
-    });
+    const users = await prisma.user.findMany();
 
     let emailsSent = 0;
 
     for (const user of users) {
+        if (!user.selfPersonId) continue; // safety guard, shouldn't happen
+
         const personalExpenses = await prisma.expense.findMany({
             where: {
                 ownerId: user.id,
@@ -33,26 +31,31 @@ export async function GET(req: NextRequest) {
             0
         );
 
-        const workspaceSummaries: { workspaceName: string; total: number }[] = [];
-
-        for (const membership of user.workspaces) {
-            const splits = await prisma.expenseSplit.findMany({
-                where: {
-                    userId: user.id,
-                    expense: {
-                        workspaceId: membership.workspaceId,
-                        date: { gte: startOfDay, lte: endOfDay },
-                    },
+        // This user's own share of today's expenses in each workspace they own
+        const mySplitsToday = await prisma.expenseSplit.findMany({
+            where: {
+                personId: user.selfPersonId,
+                expense: {
+                    workspace: { ownerId: user.id },
+                    date: { gte: startOfDay, lte: endOfDay },
                 },
-            });
-            const total = splits.reduce((sum, s) => sum + Number(s.shareAmount), 0);
-            if (total > 0) {
-                workspaceSummaries.push({
-                    workspaceName: membership.workspace.name,
-                    total,
-                });
-            }
+            },
+            include: {
+                expense: { include: { workspace: true } },
+            },
+        });
+
+        const workspaceTotals = new Map<string, number>();
+        for (const split of mySplitsToday) {
+            const wsName = split.expense.workspace?.name ?? "Workspace";
+            workspaceTotals.set(
+                wsName,
+                (workspaceTotals.get(wsName) ?? 0) + Number(split.shareAmount)
+            );
         }
+        const workspaceSummaries = Array.from(workspaceTotals.entries()).map(
+            ([workspaceName, total]) => ({ workspaceName, total })
+        );
 
         if (personalTotal > 0 || workspaceSummaries.length > 0) {
             await sendDailySummaryEmail(
