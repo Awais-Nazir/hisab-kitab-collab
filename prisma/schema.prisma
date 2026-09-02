@@ -20,6 +20,7 @@ model User {
   people           Person[]    @relation("OwnedPeople")
   selfPerson       Person?     @relation("SelfPerson", fields: [selfPersonId], references: [id])
   workspaces       Workspace[]
+  categories       Category[]  @relation("OwnedCategories")
 }
 
 model Person {
@@ -108,4 +109,15 @@ model Settlement {
   fromPerson   Person    @relation("SettlementFrom", fields: [fromPersonId], references: [id])
   toPerson     Person    @relation("SettlementTo", fields: [toPersonId], references: [id])
   workspace    Workspace @relation(fields: [workspaceId], references: [id])
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  ownerId   String
+  name      String
+  createdAt DateTime @default(now())
+
+  owner User @relation("OwnedCategories", fields: [ownerId], references: [id])
+
+  @@unique([ownerId, name])
 }

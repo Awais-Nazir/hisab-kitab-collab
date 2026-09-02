@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { Header } from "@/components/Header";
+import { CategorySelect } from "@/components/CategorySelect";
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
 
 type User = { id: string; email: string; name: string };
 type Workspace = { id: string; name: string };
@@ -17,6 +19,7 @@ type Expense = {
 type DayStat = { count: number; total: number };
 type PersonNet = { personId: string; name: string; netBalance: number };
 type Overview = { today: DayStat; yesterday: DayStat; netByPerson: PersonNet[] };
+type TrendDay = { label: string; total: number };
 
 export default function DashboardPage() {
     const router = useRouter();
@@ -24,6 +27,7 @@ export default function DashboardPage() {
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
     const [expenses, setExpenses] = useState<Expense[]>([]);
     const [overview, setOverview] = useState<Overview | null>(null);
+    const [trend, setTrend] = useState<TrendDay[]>([]);
     const [loading, setLoading] = useState(true);
 
     const [amount, setAmount] = useState("");
@@ -42,14 +46,16 @@ export default function DashboardPage() {
                 const meRes = await apiFetch<{ user: User }>("/api/auth/me");
                 setUser(meRes.user);
 
-                const [wsRes, expRes, overviewRes] = await Promise.all([
+                const [wsRes, expRes, overviewRes, trendRes] = await Promise.all([
                     apiFetch<{ workspaces: Workspace[] }>("/api/workspaces"),
                     apiFetch<{ expenses: Expense[] }>("/api/expenses/personal"),
                     apiFetch<Overview>("/api/stats/overview"),
+                    apiFetch<{ days: TrendDay[] }>("/api/stats/last7days"),
                 ]);
                 setWorkspaces(wsRes.workspaces);
                 setExpenses(expRes.expenses);
                 setOverview(overviewRes);
+                setTrend(trendRes.days);
             } catch {
                 router.push("/login");
             } finally {
@@ -59,10 +65,14 @@ export default function DashboardPage() {
         load();
     }, [router]);
 
-    async function refreshOverview() {
+    async function refreshStats() {
         try {
-            const res = await apiFetch<Overview>("/api/stats/overview");
-            setOverview(res);
+            const [overviewRes, trendRes] = await Promise.all([
+                apiFetch<Overview>("/api/stats/overview"),
+                apiFetch<{ days: TrendDay[] }>("/api/stats/last7days"),
+            ]);
+            setOverview(overviewRes);
+            setTrend(trendRes.days);
         } catch {
             // non-critical
         }
@@ -94,7 +104,7 @@ export default function DashboardPage() {
             setCategory("");
             setExpDate(new Date().toISOString().slice(0, 10));
             setExpTime(new Date().toTimeString().slice(0, 5));
-            await refreshOverview();
+            await refreshStats();
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to add expense");
         } finally {
@@ -135,6 +145,7 @@ export default function DashboardPage() {
     const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
     const owedToYou = overview?.netByPerson.filter((p) => p.netBalance > 0) ?? [];
     const youOwe = overview?.netByPerson.filter((p) => p.netBalance < 0) ?? [];
+    const netTotal = (overview?.netByPerson ?? []).reduce((s, p) => s + p.netBalance, 0);
 
     return (
         <div className="page-wide">
@@ -144,32 +155,54 @@ export default function DashboardPage() {
                 Manage contacts →
             </a>
 
+            {/* Stat cards row */}
+            <div className="stat-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginBottom: "1rem" }}>
+                <div className="stat-card-v2">
+                    <p className="stat-label">Today</p>
+                    <p className="stat-value">{overview?.today.total.toFixed(2) ?? "0.00"}</p>
+                    <p className="stat-sub">{overview?.today.count ?? 0} {overview?.today.count === 1 ? "expense" : "expenses"} · your share</p>
+                </div>
+                <div className="stat-card-v2">
+                    <p className="stat-label">Yesterday</p>
+                    <p className="stat-value">{overview?.yesterday.total.toFixed(2) ?? "0.00"}</p>
+                    <p className="stat-sub">{overview?.yesterday.count ?? 0} {overview?.yesterday.count === 1 ? "expense" : "expenses"} · your share</p>
+                </div>
+                <div className={`stat-card-v2 ${netTotal >= 0 ? "accent-positive" : "accent-negative"}`}>
+                    <p className="stat-label">Net balance</p>
+                    <p className="stat-value" style={{ color: netTotal >= 0 ? "var(--color-positive)" : "var(--color-negative)" }}>
+                        {netTotal >= 0 ? "+" : ""}{netTotal.toFixed(2)}
+                    </p>
+                    <p className="stat-sub">across all contacts</p>
+                </div>
+            </div>
+
+            {/* Trend chart */}
+            <div className="chart-card">
+                <h2 className="font-medium mb-3">Last 7 days</h2>
+                <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={trend} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 12, fill: "var(--color-ink-muted)" }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 12, fill: "var(--color-ink-muted)" }} axisLine={false} tickLine={false} />
+                        <Tooltip
+                            contentStyle={{
+                                background: "var(--color-surface)",
+                                border: "1px solid var(--color-border)",
+                                borderRadius: "8px",
+                                fontSize: "0.85rem",
+                            }}
+                            formatter={(value: number) => [value.toFixed(2), "Spent"]}
+                        />
+                        <Bar dataKey="total" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                </ResponsiveContainer>
+            </div>
+
             <div className="dashboard-grid">
-                {/* Left column: stats + workspaces */}
+                {/* Left column */}
                 <div>
                     <section className="card">
-                        <h2 className="font-medium mb-3">Overview</h2>
-                        <div className="stat-grid" style={{ marginBottom: "1rem" }}>
-                            <div className="stat-box">
-                                <p className="muted" style={{ margin: 0 }}>Today (your share)</p>
-                                <p style={{ margin: "0.25rem 0 0", fontSize: "1.1rem", fontWeight: 600 }}>
-                                    {overview?.today.total.toFixed(2) ?? "0.00"}
-                                </p>
-                                <p className="muted" style={{ margin: 0 }}>
-                                    {overview?.today.count ?? 0} {overview?.today.count === 1 ? "expense" : "expenses"}
-                                </p>
-                            </div>
-                            <div className="stat-box">
-                                <p className="muted" style={{ margin: 0 }}>Yesterday (your share)</p>
-                                <p style={{ margin: "0.25rem 0 0", fontSize: "1.1rem", fontWeight: 600 }}>
-                                    {overview?.yesterday.total.toFixed(2) ?? "0.00"}
-                                </p>
-                                <p className="muted" style={{ margin: 0 }}>
-                                    {overview?.yesterday.count ?? 0} {overview?.yesterday.count === 1 ? "expense" : "expenses"}
-                                </p>
-                            </div>
-                        </div>
-
+                        <h2 className="font-medium mb-3">Lena / Dena</h2>
                         {owedToYou.length === 0 && youOwe.length === 0 ? (
                             <p className="muted">All settled up — nobody owes anybody anything.</p>
                         ) : (
@@ -234,13 +267,17 @@ export default function DashboardPage() {
                         <span className="muted">Total: {total.toFixed(2)}</span>
                     </div>
 
-                    <form onSubmit={handleAddExpense} className="form-grid-3" style={{ marginBottom: "1rem" }}>
-                        <input type="number" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} required className="input" />
-                        <input type="text" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required className="input" />
-                        <input type="text" placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} className="input" />
-                        <input type="date" value={expDate} onChange={(e) => setExpDate(e.target.value)} required className="input" />
-                        <input type="time" value={expTime} onChange={(e) => setExpTime(e.target.value)} required className="input" />
-                        <button type="submit" disabled={submitting} className="btn btn-primary" style={{ gridColumn: "1 / -1" }}>
+                    <form onSubmit={handleAddExpense} className="flex flex-col gap-2" style={{ marginBottom: "1rem" }}>
+                        <div className="form-grid-3">
+                            <input type="number" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} required className="input" />
+                            <input type="text" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required className="input" />
+                            <CategorySelect value={category} onChange={setCategory} />
+                        </div>
+                        <div className="form-grid-2">
+                            <input type="date" value={expDate} onChange={(e) => setExpDate(e.target.value)} required className="input" />
+                            <input type="time" value={expTime} onChange={(e) => setExpTime(e.target.value)} required className="input" />
+                        </div>
+                        <button type="submit" disabled={submitting} className="btn btn-primary">
                             {submitting ? "Adding..." : "Add expense"}
                         </button>
                     </form>

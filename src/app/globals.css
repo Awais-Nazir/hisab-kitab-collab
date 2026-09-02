@@ -164,3 +164,93 @@ h1, h2, h3 {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* --- Design refresh: elevation + modern touches --- */
+
+:root {
+  --shadow-sm: 0 1px 3px rgba(27, 33, 31, 0.06), 0 1px 2px rgba(27, 33, 31, 0.04);
+  --shadow-md: 0 4px 12px rgba(27, 33, 31, 0.08), 0 2px 4px rgba(27, 33, 31, 0.04);
+}
+
+.card {
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s ease;
+}
+
+.input, .btn {
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.workspace-link {
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.workspace-link:hover {
+  border-color: var(--color-primary);
+}
+
+/* Avatar circle for the header */
+.avatar {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Source Serif 4', serif;
+  font-weight: 600;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+
+.header-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+}
+
+/* Stat cards with a colored accent bar and icon slot */
+.stat-card-v2 {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  background: var(--color-surface);
+  border-left: 3px solid var(--color-primary);
+  box-shadow: var(--shadow-sm);
+}
+.stat-card-v2.accent-positive { border-left-color: var(--color-positive); }
+.stat-card-v2.accent-negative { border-left-color: var(--color-negative); }
+
+.stat-card-v2 .stat-label {
+  color: var(--color-ink-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0;
+}
+.stat-card-v2 .stat-value {
+  font-family: 'Source Serif 4', serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0.2rem 0 0;
+}
+.stat-card-v2 .stat-sub {
+  color: var(--color-ink-muted);
+  font-size: 0.78rem;
+  margin: 0.15rem 0 0;
+}
+
+.chart-card {
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 1.25rem 1rem 0.5rem;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 1rem;
+}

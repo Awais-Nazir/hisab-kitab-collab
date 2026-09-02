@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { CategorySelect } from "@/components/CategorySelect";
 
 type Person = { id: string; name: string; email: string | null; isSelf?: boolean };
 type Member = { personId: string; person: Person };
@@ -419,7 +420,7 @@ export default function WorkspacePage() {
                             <input type="time" value={expTime} onChange={(e) => setExpTime(e.target.value)} required className="input" />
                         </div>
                     </div>
-                    <input type="text" placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} className="input" />
+                    <CategorySelect value={category} onChange={setCategory} />
 
                     <ShareEditor
                         title="Split with (who consumed this)"
