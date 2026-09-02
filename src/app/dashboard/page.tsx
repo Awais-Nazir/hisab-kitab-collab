@@ -191,7 +191,7 @@ export default function DashboardPage() {
                                 borderRadius: "8px",
                                 fontSize: "0.85rem",
                             }}
-                            formatter={(value: number) => [value.toFixed(2), "Spent"]}
+                            formatter={(value) => [Number(value ?? 0).toFixed(2), "Spent"]}
                         />
                         <Bar dataKey="total" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
                     </BarChart>
