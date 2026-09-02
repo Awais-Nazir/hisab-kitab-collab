@@ -29,6 +29,8 @@ export default function DashboardPage() {
     const [amount, setAmount] = useState("");
     const [description, setDescription] = useState("");
     const [category, setCategory] = useState("");
+    const [expDate, setExpDate] = useState(() => new Date().toISOString().slice(0, 10));
+    const [expTime, setExpTime] = useState(() => new Date().toTimeString().slice(0, 5));
     const [submitting, setSubmitting] = useState(false);
 
     const [newWorkspaceName, setNewWorkspaceName] = useState("");
@@ -78,13 +80,20 @@ export default function DashboardPage() {
                         amount: parseFloat(amount),
                         description,
                         category: category || undefined,
+                        date: new Date(`${expDate}T${expTime}`).toISOString(),
                     }),
                 }
             );
-            setExpenses((prev) => [res.expense, ...prev]);
+            setExpenses((prev) =>
+                [res.expense, ...prev].sort(
+                    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+                )
+            );
             setAmount("");
             setDescription("");
             setCategory("");
+            setExpDate(new Date().toISOString().slice(0, 10));
+            setExpTime(new Date().toTimeString().slice(0, 5));
             await refreshOverview();
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to add expense");
@@ -229,6 +238,8 @@ export default function DashboardPage() {
                         <input type="number" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} required className="input" />
                         <input type="text" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required className="input" />
                         <input type="text" placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} className="input" />
+                        <input type="date" value={expDate} onChange={(e) => setExpDate(e.target.value)} required className="input" />
+                        <input type="time" value={expTime} onChange={(e) => setExpTime(e.target.value)} required className="input" />
                         <button type="submit" disabled={submitting} className="btn btn-primary" style={{ gridColumn: "1 / -1" }}>
                             {submitting ? "Adding..." : "Add expense"}
                         </button>
@@ -241,7 +252,7 @@ export default function DashboardPage() {
                                 <div>
                                     <p style={{ margin: 0 }}>{exp.description}</p>
                                     <p className="muted">
-                                        {exp.category ?? "—"} · {new Date(exp.date).toLocaleDateString()}
+                                        {exp.category ?? "—"} · {new Date(exp.date).toLocaleString()}
                                     </p>
                                 </div>
                                 <span>{Number(exp.amount).toFixed(2)}</span>

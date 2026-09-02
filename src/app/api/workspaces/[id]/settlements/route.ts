@@ -61,3 +61,26 @@ export async function POST(
 
     return NextResponse.json({ settlement });
 }
+
+export async function GET(
+    req: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const { user, errorResponse } = await requireUser();
+    if (!user) return errorResponse;
+
+    const { id: workspaceId } = await params;
+
+    const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
+    if (!workspace || workspace.ownerId !== user.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    const settlements = await prisma.settlement.findMany({
+        where: { workspaceId },
+        include: { fromPerson: true, toPerson: true },
+        orderBy: { date: "desc" },
+    });
+
+    return NextResponse.json({ settlements });
+}

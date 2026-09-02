@@ -19,6 +19,25 @@ type Expense = {
     payments: Payment[];
 };
 type Balance = { personId: string; name: string; isSelf: boolean; netBalance: number };
+type Settlement = {
+    id: string;
+    amount: string;
+    date: string;
+    note: string | null;
+    fromPerson: Person;
+    toPerson: Person;
+};
+
+function todayDateStr() {
+    return new Date().toISOString().slice(0, 10);
+}
+function nowTimeStr() {
+    const d = new Date();
+    return d.toTimeString().slice(0, 5);
+}
+function combineDateTime(dateStr: string, timeStr: string): string {
+    return new Date(`${dateStr}T${timeStr}`).toISOString();
+}
 
 function ShareEditor({
     title,
@@ -123,16 +142,17 @@ export default function WorkspacePage() {
     const [contacts, setContacts] = useState<Person[]>([]);
     const [expenses, setExpenses] = useState<Expense[]>([]);
     const [balances, setBalances] = useState<Balance[]>([]);
+    const [settlements, setSettlements] = useState<Settlement[]>([]);
     const [loading, setLoading] = useState(true);
 
-    // Add member
     const [selectedContactId, setSelectedContactId] = useState("");
     const [addingMember, setAddingMember] = useState(false);
 
-    // Expense form
     const [amount, setAmount] = useState("");
     const [description, setDescription] = useState("");
     const [category, setCategory] = useState("");
+    const [expDate, setExpDate] = useState(todayDateStr());
+    const [expTime, setExpTime] = useState(nowTimeStr());
     const [splitSelected, setSplitSelected] = useState<Set<string>>(new Set());
     const [splitMode, setSplitMode] = useState<"equal" | "custom">("equal");
     const [splitCustom, setSplitCustom] = useState<Record<string, string>>({});
@@ -141,23 +161,24 @@ export default function WorkspacePage() {
     const [payCustom, setPayCustom] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState(false);
 
-    // Settle form
     const [settleFrom, setSettleFrom] = useState("");
     const [settleTo, setSettleTo] = useState("");
     const [settleAmount, setSettleAmount] = useState("");
     const [settling, setSettling] = useState(false);
 
     async function loadAll() {
-        const [membersRes, contactsRes, expensesRes, balancesRes] = await Promise.all([
+        const [membersRes, contactsRes, expensesRes, balancesRes, settlementsRes] = await Promise.all([
             apiFetch<{ members: Member[] }>(`/api/workspaces/${workspaceId}/members`),
             apiFetch<{ people: Person[] }>("/api/people"),
             apiFetch<{ expenses: Expense[] }>(`/api/workspaces/${workspaceId}/expenses`),
             apiFetch<{ balances: Balance[] }>(`/api/workspaces/${workspaceId}/balances`),
+            apiFetch<{ settlements: Settlement[] }>(`/api/workspaces/${workspaceId}/settlements`),
         ]);
         setMembers(membersRes.members);
         setContacts(contactsRes.people);
         setExpenses(expensesRes.expenses);
         setBalances(balancesRes.balances);
+        setSettlements(settlementsRes.settlements);
     }
 
     useEffect(() => {
@@ -210,15 +231,20 @@ export default function WorkspacePage() {
                         amount: total,
                         description,
                         category: category || undefined,
+                        date: combineDateTime(expDate, expTime),
                         splits: splits.map((s) => ({ personId: s.personId, amount: parseFloat(s.amount) })),
                         payments: payments.map((p) => ({ personId: p.personId, amount: parseFloat(p.amount) })),
                     }),
                 }
             );
-            setExpenses((prev) => [res.expense, ...prev]);
+            setExpenses((prev) =>
+                [res.expense, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            );
             setAmount("");
             setDescription("");
             setCategory("");
+            setExpDate(todayDateStr());
+            setExpTime(nowTimeStr());
             setSplitSelected(new Set());
             setSplitCustom({});
             setPaySelected(new Set());
@@ -250,10 +276,12 @@ export default function WorkspacePage() {
             setSettleFrom("");
             setSettleTo("");
             setSettleAmount("");
-            const balancesRes = await apiFetch<{ balances: Balance[] }>(
-                `/api/workspaces/${workspaceId}/balances`
-            );
+            const [balancesRes, settlementsRes] = await Promise.all([
+                apiFetch<{ balances: Balance[] }>(`/api/workspaces/${workspaceId}/balances`),
+                apiFetch<{ settlements: Settlement[] }>(`/api/workspaces/${workspaceId}/settlements`),
+            ]);
             setBalances(balancesRes.balances);
+            setSettlements(settlementsRes.settlements);
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to settle");
         } finally {
@@ -290,7 +318,7 @@ export default function WorkspacePage() {
             <section className="card">
                 <h2 className="font-medium mb-3">Record a settlement</h2>
                 <form onSubmit={handleSettle} className="flex flex-col gap-2">
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="form-grid-2">
                         <select value={settleFrom} onChange={(e) => setSettleFrom(e.target.value)} required className="input">
                             <option value="">From...</option>
                             {members.map((m) => (
@@ -321,6 +349,23 @@ export default function WorkspacePage() {
                         {settling ? "Recording..." : "Record settlement"}
                     </button>
                 </form>
+
+                {settlements.length > 0 && (
+                    <div style={{ marginTop: "1rem" }}>
+                        <p className="muted" style={{ marginBottom: "0.25rem" }}>History</p>
+                        {settlements.map((s) => (
+                            <div key={s.id} className="row">
+                                <div>
+                                    <p style={{ margin: 0 }}>
+                                        {s.fromPerson.isSelf ? "You" : s.fromPerson.name} → {s.toPerson.isSelf ? "You" : s.toPerson.name}
+                                    </p>
+                                    <p className="muted">{new Date(s.date).toLocaleString()}</p>
+                                </div>
+                                <span>{Number(s.amount).toFixed(2)}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </section>
 
             {/* Members */}
@@ -364,6 +409,16 @@ export default function WorkspacePage() {
                         <input type="number" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} required className="input" />
                         <input type="text" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required className="input" />
                     </div>
+                    <div className="form-grid-2">
+                        <div>
+                            <label className="form-label">Date</label>
+                            <input type="date" value={expDate} onChange={(e) => setExpDate(e.target.value)} required className="input" />
+                        </div>
+                        <div>
+                            <label className="form-label">Time</label>
+                            <input type="time" value={expTime} onChange={(e) => setExpTime(e.target.value)} required className="input" />
+                        </div>
+                    </div>
                     <input type="text" placeholder="Category (optional)" value={category} onChange={(e) => setCategory(e.target.value)} className="input" />
 
                     <ShareEditor
@@ -404,7 +459,7 @@ export default function WorkspacePage() {
                             <span>{exp.description}</span>
                             <span>{Number(exp.amount).toFixed(2)}</span>
                         </div>
-                        <p className="muted">{new Date(exp.date).toLocaleDateString()}</p>
+                        <p className="muted">{new Date(exp.date).toLocaleString()}</p>
                         <p className="muted">
                             Paid: {exp.payments.map((p) => `${p.person.isSelf ? "You" : p.person.name} ${Number(p.amountPaid).toFixed(2)}`).join(", ")}
                         </p>

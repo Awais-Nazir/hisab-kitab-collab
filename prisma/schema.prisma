@@ -10,121 +10,102 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  createdAt    DateTime @default(now())
-
+  id               String      @id @default(cuid())
+  email            String      @unique
+  passwordHash     String
+  name             String
+  createdAt        DateTime    @default(now())
+  selfPersonId     String?     @unique
   personalExpenses Expense[]   @relation("PersonalExpenses")
-  workspaces       Workspace[]
   people           Person[]    @relation("OwnedPeople")
-
-  selfPersonId String? @unique
-  selfPerson   Person? @relation("SelfPerson", fields: [selfPersonId], references: [id])
+  selfPerson       Person?     @relation("SelfPerson", fields: [selfPersonId], references: [id])
+  workspaces       Workspace[]
 }
 
 model Person {
-  // Represents anyone in your ledger — a real contact you added,
-  // OR (when isSelf = true) a stand-in for you, the account owner.
-  // Contacts never log in; only the owning User has real auth.
-  id        String   @id @default(cuid())
-  ownerId   String
-  name      String
-  email     String?
-  isSelf    Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  owner  User  @relation("OwnedPeople", fields: [ownerId], references: [id])
-  selfOf User? @relation("SelfPerson")
-
-  memberships     WorkspaceMember[]
-  splits          ExpenseSplit[]
+  id              String            @id @default(cuid())
+  ownerId         String
+  name            String
+  email           String?
+  isSelf          Boolean           @default(false)
+  createdAt       DateTime          @default(now())
   payments        ExpensePayment[]
+  splits          ExpenseSplit[]
+  owner           User              @relation("OwnedPeople", fields: [ownerId], references: [id])
   settlementsFrom Settlement[]      @relation("SettlementFrom")
   settlementsTo   Settlement[]      @relation("SettlementTo")
+  selfOf          User?             @relation("SelfPerson")
+  memberships     WorkspaceMember[]
 }
 
 model Workspace {
-  id        String   @id @default(cuid())
-  ownerId   String
-  name      String
-  createdAt DateTime @default(now())
-
-  owner       User              @relation(fields: [ownerId], references: [id])
-  members     WorkspaceMember[]
+  id          String            @id @default(cuid())
+  ownerId     String
+  name        String
+  createdAt   DateTime          @default(now())
   expenses    Expense[]
   settlements Settlement[]
+  owner       User              @relation(fields: [ownerId], references: [id])
+  members     WorkspaceMember[]
 }
 
 model WorkspaceMember {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   workspaceId String
   personId    String
-  joinedAt    DateTime @default(now())
-
-  workspace Workspace @relation(fields: [workspaceId], references: [id])
-  person    Person    @relation(fields: [personId], references: [id])
+  joinedAt    DateTime  @default(now())
+  person      Person    @relation(fields: [personId], references: [id])
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
 
   @@unique([workspaceId, personId])
 }
 
 model Expense {
-  id          String   @id @default(cuid())
-  amount      Decimal  @db.Decimal(10, 2)
+  id          String           @id @default(cuid())
+  amount      Decimal          @db.Decimal(10, 2)
   description String
   category    String?
-  date        DateTime @default(now())
-  createdAt   DateTime @default(now())
-
-  // Personal expense: workspaceId null, ownerId set (a real User)
-  // Workspace expense: workspaceId set, ownerId null
+  date        DateTime         @default(now())
+  createdAt   DateTime         @default(now())
   workspaceId String?
-  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
-
-  ownerId String?
-  owner   User?   @relation("PersonalExpenses", fields: [ownerId], references: [id])
-
-  splits   ExpenseSplit[]
-  payments ExpensePayment[]
+  ownerId     String?
+  owner       User?            @relation("PersonalExpenses", fields: [ownerId], references: [id])
+  workspace   Workspace?       @relation(fields: [workspaceId], references: [id])
+  payments    ExpensePayment[]
+  splits      ExpenseSplit[]
 }
 
 model ExpenseSplit {
-  // Who OWES what — consumption side
   id          String  @id @default(cuid())
   expenseId   String
   personId    String
   shareAmount Decimal @db.Decimal(10, 2)
-
-  expense Expense @relation(fields: [expenseId], references: [id])
-  person  Person  @relation(fields: [personId], references: [id])
+  expense     Expense @relation(fields: [expenseId], references: [id])
+  person      Person  @relation(fields: [personId], references: [id])
 
   @@unique([expenseId, personId])
 }
 
 model ExpensePayment {
-  // Who actually PAID what — cash-fronted side
   id         String  @id @default(cuid())
   expenseId  String
   personId   String
   amountPaid Decimal @db.Decimal(10, 2)
-
-  expense Expense @relation(fields: [expenseId], references: [id])
-  person  Person  @relation(fields: [personId], references: [id])
+  expense    Expense @relation(fields: [expenseId], references: [id])
+  person     Person  @relation(fields: [personId], references: [id])
 
   @@unique([expenseId, personId])
 }
 
 model Settlement {
-  id          String   @id @default(cuid())
-  workspaceId String
+  id           String    @id @default(cuid())
+  workspaceId  String
   fromPersonId String
   toPersonId   String
-  amount      Decimal  @db.Decimal(10, 2)
-  date        DateTime @default(now())
-  note        String?
-
-  workspace  Workspace @relation(fields: [workspaceId], references: [id])
-  fromPerson Person    @relation("SettlementFrom", fields: [fromPersonId], references: [id])
-  toPerson   Person    @relation("SettlementTo", fields: [toPersonId], references: [id])
+  amount       Decimal   @db.Decimal(10, 2)
+  date         DateTime  @default(now())
+  note         String?
+  fromPerson   Person    @relation("SettlementFrom", fields: [fromPersonId], references: [id])
+  toPerson     Person    @relation("SettlementTo", fields: [toPersonId], references: [id])
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
 }
