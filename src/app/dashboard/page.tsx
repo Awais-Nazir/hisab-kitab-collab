@@ -6,8 +6,9 @@ import { apiFetch } from "@/lib/api";
 import { Header } from "@/components/Header";
 import { CategorySelect } from "@/components/CategorySelect";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
+import { GlobalSettlementSection } from "@/components/GlobalSettlementSection";
 
-type User = { id: string; email: string; name: string };
+type User = { id: string; email: string; name: string, selfPersonId: string };
 type Workspace = { id: string; name: string };
 type Expense = {
     id: string;
@@ -142,6 +143,10 @@ export default function DashboardPage() {
         return <div className="p-8 text-center">Loading...</div>;
     }
 
+    if (!user) {
+        return null;
+    }
+
     const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
     const owedToYou = overview?.netByPerson.filter((p) => p.netBalance > 0) ?? [];
     const youOwe = overview?.netByPerson.filter((p) => p.netBalance < 0) ?? [];
@@ -232,6 +237,7 @@ export default function DashboardPage() {
                             </>
                         )}
                     </section>
+                    <GlobalSettlementSection selfPersonId={user.selfPersonId} onSettled={refreshStats} />
 
                     <section className="card">
                         <h2 className="font-medium mb-3">Your workspaces</h2>

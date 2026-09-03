@@ -106,6 +106,7 @@ model Settlement {
   amount       Decimal   @db.Decimal(10, 2)
   date         DateTime  @default(now())
   note         String?
+  batchId      String?
   fromPerson   Person    @relation("SettlementFrom", fields: [fromPersonId], references: [id])
   toPerson     Person    @relation("SettlementTo", fields: [toPersonId], references: [id])
   workspace    Workspace @relation(fields: [workspaceId], references: [id])
