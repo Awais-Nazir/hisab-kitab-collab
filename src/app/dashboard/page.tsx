@@ -7,6 +7,7 @@ import { Header } from "@/components/Header";
 import { CategorySelect } from "@/components/CategorySelect";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
 import { GlobalSettlementSection } from "@/components/GlobalSettlementSection";
+import { LenaDenaRow } from "@/components/LenaDenaRow";
 
 type User = { id: string; email: string; name: string, selfPersonId: string };
 type Workspace = { id: string; name: string };
@@ -254,10 +255,7 @@ export default function DashboardPage() {
                                     <div style={{ marginBottom: "0.5rem" }}>
                                         <p className="muted" style={{ marginBottom: "0.25rem" }}>You&apos;ll get</p>
                                         {owedToYou.map((p) => (
-                                            <div key={p.personId} className="row">
-                                                <span>{p.name}</span>
-                                                <span className="balance-positive">+{p.netBalance.toFixed(2)}</span>
-                                            </div>
+                                            <LenaDenaRow key={p.personId} personId={p.personId} name={p.name} netBalance={p.netBalance} />
                                         ))}
                                     </div>
                                 )}
@@ -265,10 +263,7 @@ export default function DashboardPage() {
                                     <div>
                                         <p className="muted" style={{ marginBottom: "0.25rem" }}>You owe</p>
                                         {youOwe.map((p) => (
-                                            <div key={p.personId} className="row">
-                                                <span>{p.name}</span>
-                                                <span className="balance-negative">{p.netBalance.toFixed(2)}</span>
-                                            </div>
+                                            <LenaDenaRow key={p.personId} personId={p.personId} name={p.name} netBalance={p.netBalance} />
                                         ))}
                                     </div>
                                 )}
