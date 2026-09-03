@@ -396,7 +396,7 @@ export default function WorkspacePage() {
                     </div>
                 ))}
                 <p className="muted" style={{ marginTop: "0.75rem" }}>
-                    Positive = owed money. Negative = owes money.
+                    Positive = Un se lene hain. Negative = Maine dene hain.
                 </p>
             </section>
 

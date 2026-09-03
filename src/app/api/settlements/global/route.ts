@@ -3,6 +3,7 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/requireUser";
+import { computeSelfRelativeBalances } from "@/lib/balances";
 
 const globalSettleSchema = z.object({
     fromPersonId: z.string(),
@@ -49,31 +50,37 @@ export async function POST(req: NextRequest) {
     for (const m of memberships) {
         const workspaceId = m.workspaceId;
 
-        const [splits, payments, existingSettlements, earliestExpense] = await Promise.all([
-            prisma.expenseSplit.findMany({
-                where: { personId: fromPersonId, expense: { workspaceId } },
-            }),
-            prisma.expensePayment.findMany({
-                where: { personId: fromPersonId, expense: { workspaceId } },
-            }),
-            prisma.settlement.findMany({
-                where: { workspaceId, OR: [{ fromPersonId }, { toPersonId: fromPersonId }] },
-            }),
+        // toPerson must also be a member here for a pairwise debt to make sense
+        const toIsMember = await prisma.workspaceMember.findUnique({
+            where: { workspaceId_personId: { workspaceId, personId: toPersonId } },
+        });
+        if (!toIsMember) continue;
+
+        const [expenses, existingSettlements, earliestExpense] = await Promise.all([
+            prisma.expense.findMany({ where: { workspaceId }, include: { splits: true, payments: true } }),
+            prisma.settlement.findMany({ where: { workspaceId } }),
             prisma.expense.findFirst({ where: { workspaceId }, orderBy: { date: "asc" } }),
         ]);
 
-        let net = 0;
-        for (const p of payments) net += Number(p.amountPaid);
-        for (const s of splits) net -= Number(s.shareAmount);
-        for (const s of existingSettlements) {
-            if (s.fromPersonId === fromPersonId) net += Number(s.amount);
-            if (s.toPersonId === fromPersonId) net -= Number(s.amount);
-        }
+        const expensesLite = expenses.map((e) => ({
+            amount: Number(e.amount),
+            splits: e.splits.map((s) => ({ personId: s.personId, shareAmount: Number(s.shareAmount) })),
+            payments: e.payments.map((p) => ({ personId: p.personId, amountPaid: Number(p.amountPaid) })),
+        }));
+        const settlementsLite = existingSettlements.map((s) => ({
+            fromPersonId: s.fromPersonId,
+            toPersonId: s.toPersonId,
+            amount: Number(s.amount),
+        }));
 
-        if (net < -0.01) {
+        // Compute pairwise from toPerson's perspective, then read fromPerson's balance in it
+        const net = computeSelfRelativeBalances(toPersonId, expensesLite, settlementsLite);
+        const owed = net[fromPersonId] ?? 0;
+
+        if (owed > 0.01) {
             candidates.push({
                 workspaceId,
-                owed: Math.round(Math.abs(net) * 100) / 100,
+                owed: Math.round(owed * 100) / 100,
                 oldestDate: earliestExpense?.date ?? new Date(0),
             });
         }

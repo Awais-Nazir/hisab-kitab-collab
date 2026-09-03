@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/requireUser";
+import { computeSelfRelativeBalances } from "@/lib/balances";
 
 function startOfDay(d: Date) {
     const x = new Date(d);
@@ -81,21 +82,19 @@ export async function GET() {
             Math.round((sumAmount(personalYesterday) + sumShare(mySplitsYesterday)) * 100) / 100,
     };
 
-    // Net balance per contact, aggregated across every workspace they're in
-    // (unaffected by the "my share" fix above — this is genuinely a group calculation)
-    const net: Record<string, number> = {};
-    for (const expense of allWorkspaceExpenses) {
-        for (const payment of expense.payments) {
-            net[payment.personId] = (net[payment.personId] ?? 0) + Number(payment.amountPaid);
-        }
-        for (const split of expense.splits) {
-            net[split.personId] = (net[split.personId] ?? 0) - Number(split.shareAmount);
-        }
-    }
-    for (const s of settlements) {
-        net[s.fromPersonId] = (net[s.fromPersonId] ?? 0) + Number(s.amount);
-        net[s.toPersonId] = (net[s.toPersonId] ?? 0) - Number(s.amount);
-    }
+    // Net balance per contact, relative to self specifically — not their
+    // position against the whole group (see src/lib/balances.ts)
+    const expensesLite = allWorkspaceExpenses.map((e) => ({
+        amount: Number(e.amount),
+        splits: e.splits.map((s) => ({ personId: s.personId, shareAmount: Number(s.shareAmount) })),
+        payments: e.payments.map((p) => ({ personId: p.personId, amountPaid: Number(p.amountPaid) })),
+    }));
+    const settlementsLite = settlements.map((s) => ({
+        fromPersonId: s.fromPersonId,
+        toPersonId: s.toPersonId,
+        amount: Number(s.amount),
+    }));
+    const net = computeSelfRelativeBalances(user.selfPersonId, expensesLite, settlementsLite);
 
     const contacts = await prisma.person.findMany({
         where: { ownerId: user.id, isSelf: false },
