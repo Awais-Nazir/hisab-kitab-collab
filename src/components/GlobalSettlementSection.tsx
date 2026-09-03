@@ -74,6 +74,17 @@ export function GlobalSettlementSection({
         }
     }
 
+    async function handleDeleteBatch(batchId: string) {
+        if (!confirm("Delete this global settlement? This removes it from every workspace it touched.")) return;
+        try {
+            await apiFetch(`/api/settlements/global/${batchId}`, { method: "DELETE" });
+            await load();
+            onSettled();
+        } catch (err) {
+            alert(err instanceof Error ? err.message : "Failed to delete");
+        }
+    }
+
     if (loading) return null;
 
     return (
@@ -133,7 +144,10 @@ export function GlobalSettlementSection({
                         <div key={b.batchId} className="row" style={{ flexDirection: "column", alignItems: "stretch" }}>
                             <div className="flex justify-between">
                                 <span>{b.fromPerson.isSelf ? "You" : b.fromPerson.name} → {b.toPerson.isSelf ? "You" : b.toPerson.name}</span>
-                                <span>{b.total.toFixed(2)}</span>
+                                <div className="flex items-center gap-2">
+                                    <span>{b.total.toFixed(2)}</span>
+                                    <button onClick={() => handleDeleteBatch(b.batchId)} className="btn-text" style={{ fontSize: "0.78rem" }}>Delete</button>
+                                </div>
                             </div>
                             <p className="muted">{new Date(b.date).toLocaleString()}</p>
                             <p className="muted">{b.breakdown.map((x) => `${x.workspaceName}: ${x.amount.toFixed(2)}`).join(", ")}</p>

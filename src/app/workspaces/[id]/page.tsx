@@ -162,6 +162,10 @@ export default function WorkspacePage() {
     const [payCustom, setPayCustom] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState(false);
 
+
+    const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+    const [editingSettlementId, setEditingSettlementId] = useState<string | null>(null);
+
     const [settleFrom, setSettleFrom] = useState("");
     const [settleTo, setSettleTo] = useState("");
     const [settleAmount, setSettleAmount] = useState("");
@@ -211,7 +215,8 @@ export default function WorkspacePage() {
         }
     }
 
-    async function handleAddExpense(e: React.FormEvent) {
+
+    async function handleSubmitExpense(e: React.FormEvent) {
         e.preventDefault();
         if (submitting) return;
         if (splitSelected.size === 0 || paySelected.size === 0) {
@@ -221,26 +226,34 @@ export default function WorkspacePage() {
         const total = parseFloat(amount);
         const splits = computeShares(total, splitSelected, splitMode, splitCustom);
         const payments = computeShares(total, paySelected, payMode, payCustom);
+        const payload = {
+            amount: total,
+            description,
+            category: category || undefined,
+            date: combineDateTime(expDate, expTime),
+            splits: splits.map((s) => ({ personId: s.personId, amount: parseFloat(s.amount) })),
+            payments: payments.map((p) => ({ personId: p.personId, amount: parseFloat(p.amount) })),
+        };
 
         setSubmitting(true);
         try {
-            const res = await apiFetch<{ expense: Expense }>(
-                `/api/workspaces/${workspaceId}/expenses`,
-                {
-                    method: "POST",
-                    body: JSON.stringify({
-                        amount: total,
-                        description,
-                        category: category || undefined,
-                        date: combineDateTime(expDate, expTime),
-                        splits: splits.map((s) => ({ personId: s.personId, amount: parseFloat(s.amount) })),
-                        payments: payments.map((p) => ({ personId: p.personId, amount: parseFloat(p.amount) })),
-                    }),
-                }
-            );
-            setExpenses((prev) =>
-                [res.expense, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-            );
+            let res;
+            if (editingExpenseId) {
+                res = await apiFetch<{ expense: Expense }>(
+                    `/api/workspaces/${workspaceId}/expenses/${editingExpenseId}`,
+                    { method: "PATCH", body: JSON.stringify(payload) }
+                );
+                setExpenses((prev) => prev.map((e) => (e.id === editingExpenseId ? res!.expense : e)));
+                setEditingExpenseId(null);
+            } else {
+                res = await apiFetch<{ expense: Expense }>(
+                    `/api/workspaces/${workspaceId}/expenses`,
+                    { method: "POST", body: JSON.stringify(payload) }
+                );
+                setExpenses((prev) =>
+                    [res!.expense, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                );
+            }
             setAmount("");
             setDescription("");
             setCategory("");
@@ -250,30 +263,73 @@ export default function WorkspacePage() {
             setSplitCustom({});
             setPaySelected(new Set());
             setPayCustom({});
-            const balancesRes = await apiFetch<{ balances: Balance[] }>(
-                `/api/workspaces/${workspaceId}/balances`
-            );
+            const balancesRes = await apiFetch<{ balances: Balance[] }>(`/api/workspaces/${workspaceId}/balances`);
             setBalances(balancesRes.balances);
         } catch (err) {
-            alert(err instanceof Error ? err.message : "Failed to add expense");
+            alert(err instanceof Error ? err.message : "Failed to save expense");
         } finally {
             setSubmitting(false);
         }
     }
 
-    async function handleSettle(e: React.FormEvent) {
+    function handleEditExpenseClick(exp: Expense) {
+        setEditingExpenseId(exp.id);
+        setAmount(exp.amount);
+        setDescription(exp.description);
+        setCategory(exp.category ?? "");
+        const d = new Date(exp.date);
+        setExpDate(d.toISOString().slice(0, 10));
+        setExpTime(d.toTimeString().slice(0, 5));
+        setSplitSelected(new Set(exp.splits.map((s) => s.personId)));
+        setSplitMode("custom");
+        setSplitCustom(Object.fromEntries(exp.splits.map((s) => [s.personId, s.shareAmount])));
+        setPaySelected(new Set(exp.payments.map((p) => p.personId)));
+        setPayMode("custom");
+        setPayCustom(Object.fromEntries(exp.payments.map((p) => [p.personId, p.amountPaid])));
+    }
+
+    function handleCancelExpenseEdit() {
+        setEditingExpenseId(null);
+        setAmount("");
+        setDescription("");
+        setCategory("");
+        setExpDate(todayDateStr());
+        setExpTime(nowTimeStr());
+        setSplitSelected(new Set());
+        setSplitCustom({});
+        setPaySelected(new Set());
+        setPayCustom({});
+    }
+
+    async function handleDeleteExpense(id: string) {
+        if (!confirm("Delete this expense?")) return;
+        try {
+            await apiFetch(`/api/workspaces/${workspaceId}/expenses/${id}`, { method: "DELETE" });
+            setExpenses((prev) => prev.filter((e) => e.id !== id));
+            const balancesRes = await apiFetch<{ balances: Balance[] }>(`/api/workspaces/${workspaceId}/balances`);
+            setBalances(balancesRes.balances);
+        } catch (err) {
+            alert(err instanceof Error ? err.message : "Failed to delete");
+        }
+    }
+
+    async function handleSubmitSettle(e: React.FormEvent) {
         e.preventDefault();
         if (settling || !settleFrom || !settleTo || settleFrom === settleTo) return;
         setSettling(true);
         try {
-            await apiFetch(`/api/workspaces/${workspaceId}/settlements`, {
-                method: "POST",
-                body: JSON.stringify({
-                    fromPersonId: settleFrom,
-                    toPersonId: settleTo,
-                    amount: parseFloat(settleAmount),
-                }),
-            });
+            if (editingSettlementId) {
+                await apiFetch(`/api/workspaces/${workspaceId}/settlements/${editingSettlementId}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ fromPersonId: settleFrom, toPersonId: settleTo, amount: parseFloat(settleAmount) }),
+                });
+                setEditingSettlementId(null);
+            } else {
+                await apiFetch(`/api/workspaces/${workspaceId}/settlements`, {
+                    method: "POST",
+                    body: JSON.stringify({ fromPersonId: settleFrom, toPersonId: settleTo, amount: parseFloat(settleAmount) }),
+                });
+            }
             setSettleFrom("");
             setSettleTo("");
             setSettleAmount("");
@@ -284,9 +340,38 @@ export default function WorkspacePage() {
             setBalances(balancesRes.balances);
             setSettlements(settlementsRes.settlements);
         } catch (err) {
-            alert(err instanceof Error ? err.message : "Failed to settle");
+            alert(err instanceof Error ? err.message : "Failed to save settlement");
         } finally {
             setSettling(false);
+        }
+    }
+
+    function handleEditSettleClick(s: Settlement) {
+        setEditingSettlementId(s.id);
+        setSettleFrom(s.fromPerson.id);
+        setSettleTo(s.toPerson.id);
+        setSettleAmount(s.amount);
+    }
+
+    function handleCancelSettleEdit() {
+        setEditingSettlementId(null);
+        setSettleFrom("");
+        setSettleTo("");
+        setSettleAmount("");
+    }
+
+    async function handleDeleteSettle(id: string) {
+        if (!confirm("Delete this settlement?")) return;
+        try {
+            await apiFetch(`/api/workspaces/${workspaceId}/settlements/${id}`, { method: "DELETE" });
+            const [balancesRes, settlementsRes] = await Promise.all([
+                apiFetch<{ balances: Balance[] }>(`/api/workspaces/${workspaceId}/balances`),
+                apiFetch<{ settlements: Settlement[] }>(`/api/workspaces/${workspaceId}/settlements`),
+            ]);
+            setBalances(balancesRes.balances);
+            setSettlements(settlementsRes.settlements);
+        } catch (err) {
+            alert(err instanceof Error ? err.message : "Failed to delete");
         }
     }
 
@@ -318,7 +403,7 @@ export default function WorkspacePage() {
             {/* Settle up */}
             <section className="card">
                 <h2 className="font-medium mb-3">Record a settlement</h2>
-                <form onSubmit={handleSettle} className="flex flex-col gap-2">
+                <form onSubmit={handleSubmitSettle} className="flex flex-col gap-2">
                     <div className="form-grid-2">
                         <select value={settleFrom} onChange={(e) => setSettleFrom(e.target.value)} required className="input">
                             <option value="">From...</option>
@@ -347,8 +432,11 @@ export default function WorkspacePage() {
                         className="input"
                     />
                     <button type="submit" disabled={settling} className="btn btn-primary">
-                        {settling ? "Recording..." : "Record settlement"}
+                        {settling ? "Saving..." : editingSettlementId ? "Update settlement" : "Record settlement"}
                     </button>
+                    {editingSettlementId && (
+                        <button type="button" onClick={handleCancelSettleEdit} className="btn-text">Cancel edit</button>
+                    )}
                 </form>
 
                 {settlements.length > 0 && (
@@ -362,7 +450,11 @@ export default function WorkspacePage() {
                                     </p>
                                     <p className="muted">{new Date(s.date).toLocaleString()}</p>
                                 </div>
-                                <span>{Number(s.amount).toFixed(2)}</span>
+                                <div className="flex items-center gap-2">
+                                    <span>{Number(s.amount).toFixed(2)}</span>
+                                    <button onClick={() => handleEditSettleClick(s)} className="btn-text" style={{ fontSize: "0.78rem" }}>Edit</button>
+                                    <button onClick={() => handleDeleteSettle(s.id)} className="btn-text" style={{ fontSize: "0.78rem" }}>Delete</button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -405,7 +497,7 @@ export default function WorkspacePage() {
             {/* Add expense */}
             <section className="card">
                 <h2 className="font-medium mb-3">Add shared expense</h2>
-                <form onSubmit={handleAddExpense} className="flex flex-col gap-3">
+                <form onSubmit={handleSubmitExpense} className="flex flex-col gap-3">
                     <div className="grid grid-cols-2 gap-2">
                         <input type="number" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} required className="input" />
                         <input type="text" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required className="input" />
@@ -445,8 +537,11 @@ export default function WorkspacePage() {
                     />
 
                     <button type="submit" disabled={submitting} className="btn btn-primary">
-                        {submitting ? "Adding..." : "Add expense"}
+                        {submitting ? "Saving..." : editingExpenseId ? "Update expense" : "Add expense"}
                     </button>
+                    {editingExpenseId && (
+                        <button type="button" onClick={handleCancelExpenseEdit} className="btn-text">Cancel edit</button>
+                    )}
                 </form>
             </section>
 
@@ -458,7 +553,11 @@ export default function WorkspacePage() {
                     <div key={exp.id} className="row" style={{ flexDirection: "column", alignItems: "stretch" }}>
                         <div className="flex justify-between">
                             <span>{exp.description}</span>
-                            <span>{Number(exp.amount).toFixed(2)}</span>
+                            <div className="flex items-center gap-2">
+                                <span>{Number(exp.amount).toFixed(2)}</span>
+                                <button onClick={() => handleEditExpenseClick(exp)} className="btn-text" style={{ fontSize: "0.78rem" }}>Edit</button>
+                                <button onClick={() => handleDeleteExpense(exp.id)} className="btn-text" style={{ fontSize: "0.78rem" }}>Delete</button>
+                            </div>
                         </div>
                         <p className="muted">{new Date(exp.date).toLocaleString()}</p>
                         <p className="muted">

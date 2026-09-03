@@ -41,6 +41,8 @@ export default function DashboardPage() {
     const [newWorkspaceName, setNewWorkspaceName] = useState("");
     const [creatingWorkspace, setCreatingWorkspace] = useState(false);
 
+    const [editingId, setEditingId] = useState<string | null>(null);
+
     useEffect(() => {
         async function load() {
             try {
@@ -79,27 +81,33 @@ export default function DashboardPage() {
         }
     }
 
-    async function handleAddExpense(e: React.FormEvent) {
+
+    async function handleSubmitExpense(e: React.FormEvent) {
         e.preventDefault();
         setSubmitting(true);
         try {
-            const res = await apiFetch<{ expense: Expense }>(
-                "/api/expenses/personal",
-                {
+            const payload = {
+                amount: parseFloat(amount),
+                description,
+                category: category || undefined,
+                date: new Date(`${expDate}T${expTime}`).toISOString(),
+            };
+            if (editingId) {
+                const res = await apiFetch<{ expense: Expense }>(`/api/expenses/personal/${editingId}`, {
+                    method: "PATCH",
+                    body: JSON.stringify(payload),
+                });
+                setExpenses((prev) => prev.map((e) => (e.id === editingId ? res.expense : e)));
+                setEditingId(null);
+            } else {
+                const res = await apiFetch<{ expense: Expense }>("/api/expenses/personal", {
                     method: "POST",
-                    body: JSON.stringify({
-                        amount: parseFloat(amount),
-                        description,
-                        category: category || undefined,
-                        date: new Date(`${expDate}T${expTime}`).toISOString(),
-                    }),
-                }
-            );
-            setExpenses((prev) =>
-                [res.expense, ...prev].sort(
-                    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-                )
-            );
+                    body: JSON.stringify(payload),
+                });
+                setExpenses((prev) =>
+                    [res.expense, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                );
+            }
             setAmount("");
             setDescription("");
             setCategory("");
@@ -107,9 +115,39 @@ export default function DashboardPage() {
             setExpTime(new Date().toTimeString().slice(0, 5));
             await refreshStats();
         } catch (err) {
-            alert(err instanceof Error ? err.message : "Failed to add expense");
+            alert(err instanceof Error ? err.message : "Failed to save expense");
         } finally {
             setSubmitting(false);
+        }
+    }
+
+    function handleEditClick(exp: Expense) {
+        setEditingId(exp.id);
+        setAmount(exp.amount);
+        setDescription(exp.description);
+        setCategory(exp.category ?? "");
+        const d = new Date(exp.date);
+        setExpDate(d.toISOString().slice(0, 10));
+        setExpTime(d.toTimeString().slice(0, 5));
+    }
+
+    function handleCancelEdit() {
+        setEditingId(null);
+        setAmount("");
+        setDescription("");
+        setCategory("");
+        setExpDate(new Date().toISOString().slice(0, 10));
+        setExpTime(new Date().toTimeString().slice(0, 5));
+    }
+
+    async function handleDeleteExpense(id: string) {
+        if (!confirm("Delete this expense?")) return;
+        try {
+            await apiFetch(`/api/expenses/personal/${id}`, { method: "DELETE" });
+            setExpenses((prev) => prev.filter((e) => e.id !== id));
+            await refreshStats();
+        } catch (err) {
+            alert(err instanceof Error ? err.message : "Failed to delete");
         }
     }
 
@@ -273,7 +311,7 @@ export default function DashboardPage() {
                         <span className="muted">Total: {total.toFixed(2)}</span>
                     </div>
 
-                    <form onSubmit={handleAddExpense} className="flex flex-col gap-2" style={{ marginBottom: "1rem" }}>
+                    <form onSubmit={handleSubmitExpense} className="flex flex-col gap-2" style={{ marginBottom: "1rem" }}>
                         <div className="form-grid-3">
                             <input type="number" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} required className="input" />
                             <input type="text" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required className="input" />
@@ -284,8 +322,11 @@ export default function DashboardPage() {
                             <input type="time" value={expTime} onChange={(e) => setExpTime(e.target.value)} required className="input" />
                         </div>
                         <button type="submit" disabled={submitting} className="btn btn-primary">
-                            {submitting ? "Adding..." : "Add expense"}
+                            {submitting ? "Saving..." : editingId ? "Update expense" : "Add expense"}
                         </button>
+                        {editingId && (
+                            <button type="button" onClick={handleCancelEdit} className="btn-text">Cancel edit</button>
+                        )}
                     </form>
 
                     <div>
@@ -298,7 +339,11 @@ export default function DashboardPage() {
                                         {exp.category ?? "—"} · {new Date(exp.date).toLocaleString()}
                                     </p>
                                 </div>
-                                <span>{Number(exp.amount).toFixed(2)}</span>
+                                <div className="flex items-center gap-2">
+                                    <span>{Number(exp.amount).toFixed(2)}</span>
+                                    <button onClick={() => handleEditClick(exp)} className="btn-text" style={{ fontSize: "0.78rem" }}>Edit</button>
+                                    <button onClick={() => handleDeleteExpense(exp.id)} className="btn-text" style={{ fontSize: "0.78rem" }}>Delete</button>
+                                </div>
                             </div>
                         ))}
                     </div>
